@@ -9,7 +9,6 @@ const K_GLOBALS = 'next-postman-globals';
 const K_TABS = 'next-postman-tabs';
 const K_ACTIVE_TAB = 'next-postman-active-tab';
 const K_THEME = 'next-postman-theme';
-const K_COOKIES = 'next-postman-cookies';
 
 /**
  * Hydrates the store from localStorage on mount, then subscribes to persist
@@ -31,7 +30,6 @@ export function usePersistence(): void {
         tabs: JSON.parse(localStorage.getItem(K_TABS) || 'null') ?? undefined,
         activeTabId: JSON.parse(localStorage.getItem(K_ACTIVE_TAB) || 'null') ?? undefined,
         theme: JSON.parse(localStorage.getItem(K_THEME) || 'null') ?? undefined,
-        cookieJar: JSON.parse(localStorage.getItem(K_COOKIES) || 'null') ?? undefined,
       });
     } catch {
       // corrupt storage → start clean (still mark hydrated)
@@ -66,9 +64,6 @@ export function usePersistence(): void {
       }
       if (state.theme !== prev.theme) {
         localStorage.setItem(K_THEME, JSON.stringify(state.theme));
-      }
-      if (state.cookieJar !== prev.cookieJar) {
-        localStorage.setItem(K_COOKIES, JSON.stringify(state.cookieJar));
       }
     });
 

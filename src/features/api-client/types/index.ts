@@ -13,7 +13,12 @@ export type {
   RequestBody,
   TestResult,
   ResponseData,
-  ChallengeInfo,
+  PartValue,
+  MultipartPart,
+  BodySpec,
+  HttpRequestSpec,
+  ResponseMeta,
+  NativeError,
 } from './http';
 
 export type { Protocol, RtMessage, RtStatus, RealtimeState } from './realtime';

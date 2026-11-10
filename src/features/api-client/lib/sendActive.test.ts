@@ -29,7 +29,6 @@ const defaultTab = () => ({
   ...createDefaultTab(),
   id: 't1',
   url: 'https://example.test',
-  cookieJar: [],
 });
 
 const mockState = (overrides: Record<string, unknown> = {}) => {
@@ -40,9 +39,8 @@ const mockState = (overrides: Record<string, unknown> = {}) => {
     setIsLoading: vi.fn(),
     updateActiveTab: vi.fn(),
     setEnvVar: vi.fn(),
-    captureCookies: vi.fn(),
     addHistory: vi.fn(),
-    cookieJar: [],
+    settings: { timeoutMs: 4321 },
     ...overrides,
   };
 };
@@ -56,8 +54,6 @@ function proxyRes(body: string, status = 200) {
     size: body.length,
     rawText: body,
     headers: {},
-    finalUrl: 'http://example.test',
-    transport: 'proxy' as const,
   };
 }
 
@@ -103,23 +99,23 @@ describe('executeActiveSend', () => {
     expect(state.addHistory).toHaveBeenCalledOnce();
   });
 
-  it('captures cookies from proxy response', async () => {
+  it('passes the settings timeout to executeRequest', async () => {
     const mockExec = executeRequest as ReturnType<typeof vi.fn>;
-    mockExec.mockResolvedValue({
-      response: proxyRes('{}'),
-      finalUrl: 'https://example.test',
-    });
+    mockExec.mockResolvedValue({ response: proxyRes('{}'), finalUrl: 'https://example.test/' });
 
     const state = mockState();
     mockGetState.mockReturnValue(state);
 
     await executeActiveSend();
-    expect(state.captureCookies).toHaveBeenCalledOnce();
+    expect(mockExec.mock.calls[0][2]).toMatchObject({ timeoutMs: 4321 });
+    expect(state.addHistory).toHaveBeenCalledWith(expect.objectContaining({ url: 'https://example.test/' }));
   });
 
   it('handles pre-request error', async () => {
     const mockExec = executeRequest as ReturnType<typeof vi.fn>;
     mockExec.mockResolvedValue({ error: { phase: 'pre-request', message: 'SyntaxError' } });
+    const alertSpy = vi.fn();
+    vi.stubGlobal('alert', alertSpy);
 
     const state = mockState();
     mockGetState.mockReturnValue(state);
@@ -127,21 +123,8 @@ describe('executeActiveSend', () => {
     await executeActiveSend();
     expect(state.setIsLoading).toHaveBeenCalledWith(false);
     expect(state.updateActiveTab).not.toHaveBeenCalled();
-  });
-
-  it('handles challenge response', async () => {
-    const mockExec = executeRequest as ReturnType<typeof vi.fn>;
-    mockExec.mockResolvedValue({
-      challenge: { vendor: 'cloudflare' as const },
-    });
-
-    const state = mockState();
-    mockGetState.mockReturnValue(state);
-
-    await executeActiveSend();
-    expect(state.updateActiveTab).toHaveBeenCalledWith(
-      expect.objectContaining({ challenge: { vendor: 'cloudflare' } }),
-    );
+    expect(alertSpy).toHaveBeenCalledOnce();
+    vi.unstubAllGlobals();
   });
 
   it('writes error response when request fails', async () => {
@@ -159,20 +142,27 @@ describe('executeActiveSend', () => {
     );
   });
 
-  it('handles forceDirect retry failure', async () => {
+  it('writes the native error response when the send fails', async () => {
     const mockExec = executeRequest as ReturnType<typeof vi.fn>;
-    mockExec.mockResolvedValue({ error: { message: 'Failed' } });
+    const errRes = {
+      ok: false,
+      status: 0,
+      statusText: 'Error',
+      timeTaken: 0,
+      size: 0,
+      rawText: 'invalid URL',
+      headers: {},
+      testResults: [],
+      errorKind: 'invalid_url',
+    };
+    mockExec.mockResolvedValue({ response: errRes, error: { phase: 'send', message: 'invalid URL' } });
 
     const state = mockState();
-    state.tabs[0].challenge = { vendor: 'cloudflare' } as never;
     mockGetState.mockReturnValue(state);
 
-    await executeActiveSend({ forceDirect: true });
-    expect(state.updateActiveTab).toHaveBeenCalledWith(
-      expect.objectContaining({
-        challenge: expect.objectContaining({ retryError: 'Failed' }),
-      }),
-    );
+    await executeActiveSend();
+    expect(state.updateActiveTab).toHaveBeenCalledWith(expect.objectContaining({ response: errRes }));
+    expect(state.addHistory).not.toHaveBeenCalled();
   });
 
   it('prepends http:// when missing', async () => {
@@ -185,5 +175,17 @@ describe('executeActiveSend', () => {
 
     await executeActiveSend();
     expect(state.updateActiveTab).toHaveBeenCalledWith(expect.objectContaining({ url: 'http://example.test' }));
+  });
+
+  it('leaves an unresolved {{base}} url alone', async () => {
+    const mockExec = executeRequest as ReturnType<typeof vi.fn>;
+    mockExec.mockResolvedValue({ error: { phase: 'send', message: 'invalid URL' } });
+
+    const state = mockState();
+    state.tabs[0].url = '{{base}}/x';
+    mockGetState.mockReturnValue(state);
+
+    await executeActiveSend();
+    expect(state.updateActiveTab).not.toHaveBeenCalledWith(expect.objectContaining({ url: expect.anything() }));
   });
 });

@@ -1,18 +1,17 @@
-import type { ChallengeInfo, EnvVar, ResponseData, TabState } from '../types';
+import type { EnvVar, ResponseData, TabState } from '../types';
 import { PmSandbox } from './pmSandbox';
-import { sendViaProxy, sendDirect, type ProxyResult } from './proxyClient';
-import { detectBotChallenge } from './botWall';
-import { resolveEnv } from './envResolver';
+import { generateId } from './id';
+import { buildRequestSpec } from './native/buildRequestSpec';
+import { decodeText, toNativeError, toResponseData } from './native/decodeResponse';
+import { cancelRequest, getResponseBody, sendRequest } from './native/invoke';
 
 export interface ExecuteResult {
-  /** Populated when the request was sent and a response (any status) came back. */
+  /** The response (any status), or a status-0 error response when the send failed. */
   response: ResponseData | null;
-  /** Final target URL (with resolved params), when a request was sent. */
+  /** Request URL as sent (resolved params, protocol-normalized), when a request was built. */
   finalUrl?: string;
-  /** Set when the request never produced a response. */
+  /** Set when the request never produced an HTTP response. */
   error?: { phase: 'pre-request' | 'send'; message: string };
-  /** Set when the proxy hit a bot-wall challenge that was NOT auto-retried. */
-  challenge?: ChallengeInfo;
 }
 
 export interface ExecuteOptions {
@@ -20,64 +19,31 @@ export interface ExecuteOptions {
   onSetVar?: (key: string, value: string) => void;
   /** Current iteration's data row (Collection Runner). Seeds vars + `pm.iterationData`. */
   iterationData?: Record<string, string>;
-  /** External cancel signal (Collection Runner Cancel button). */
+  /** External cancel signal (Collection Runner Cancel button). Aborting cancels the native request. */
   signal?: AbortSignal;
-  /** Per-request timeout in ms. Default 30s. */
+  /** Per-request timeout in ms (0 = none), enforced by the engine. Omitted = the settings timeout. */
   timeoutMs?: number;
-  /** Cookie header value from the jar, attached unless the request sets its own. */
-  cookieHeader?: string;
-  /**
-   * Bot-wall handling. 'auto' = on a detected challenge, retry browser-direct for
-   * GET/HEAD with no cookie conflict (single-send). 'off' (default) = never auto-
-   * switch transport; report the challenge for the caller to surface (runner).
-   */
-  directFallback?: 'auto' | 'off';
-  /** Skip the proxy and send browser-direct immediately (manual "Retry from browser"). */
-  forceDirect?: boolean;
 }
 
-const SAFE_METHODS = ['GET', 'HEAD'];
-
-const DIRECT_FAIL_MSG =
-  'The proxy was blocked by a bot wall and the browser could not reach the target directly — ' +
-  'likely CORS, a blocked preflight, mixed content (HTTPS app → HTTP target), or a network error.';
-
-const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1', '::1', '0.0.0.0']);
-
-const LOCALHOST_HELP_MSG =
-  'Cannot reach localhost from the deployed app.\n\n' +
-  'The server-side proxy (on Vercel) cannot connect to your local machine, and the ' +
-  'browser-direct fallback was blocked by CORS.\n\n' +
-  'To fix, add this header to your API response:\n' +
-  '  Access-Control-Allow-Origin: https://<your-app>.vercel.app\n\n' +
-  'Or run next-postman locally (npm run dev) for zero-config localhost testing.';
-
-function isRemoteApp(): boolean {
-  if (typeof window === 'undefined') return true;
-  return !LOCAL_HOSTNAMES.has(window.location.hostname);
-}
-
-function isLocalhostUrl(url: string, vars: EnvVar[]): boolean {
-  if (!url) return false;
-  try {
-    const resolved = resolveEnv(url, vars).trim();
-    const withProto = /^https?:\/\//i.test(resolved) ? resolved : `http://${resolved}`;
-    return LOCAL_HOSTNAMES.has(new URL(withProto).hostname);
-  } catch {
-    return false;
-  }
+/** next-postman's error-response shape, plus the native error kind. */
+function errorResponse(kind: string, message: string): ResponseData {
+  return {
+    ok: false,
+    status: 0,
+    statusText: 'Error',
+    timeTaken: 0,
+    size: 0,
+    rawText: message,
+    headers: {},
+    testResults: [],
+    errorKind: kind,
+  };
 }
 
 /**
- * Framework-free send/test pipeline shared by single-send (useRequestRunner) and
- * the Collection Runner. Runs the pre-request script, sends (proxy by default,
- * browser-direct on `forceDirect` or an eligible auto-fallback), then runs tests.
- * Never throws, never touches the UI.
- *
- *   pre-request ─┬─ forceDirect ─────────────► sendDirect ─► tests ─► {transport:'direct'}
- *                └─ sendViaProxy ─┬─ no challenge ─────────► tests ─► {transport:'proxy'}
- *                                 └─ challenge ─┬─ auto+eligible ─► sendDirect ─► tests
- *                                               └─ else ─────────► {challenge} (caller renders UI)
+ * Framework-free send/test pipeline shared by single-send and the Collection
+ * Runner: pre-request script → native send (Rust engine; cookies, redirects and
+ * timeout handled there) → tests. Never throws, never touches the UI.
  */
 export async function executeRequest(
   tab: TabState,
@@ -93,78 +59,37 @@ export async function executeRequest(
   }
 
   // Read vars AFTER the pre-request script so its mutations drive interpolation.
-  const vars = sandbox.currentVars();
+  const spec = buildRequestSpec(tab, sandbox.currentVars(), generateId(), opts.timeoutMs);
+  const fail = (kind: string, message: string): ExecuteResult => ({
+    response: errorResponse(kind, message),
+    finalUrl: spec.url,
+    error: { phase: 'send', message },
+  });
 
-  // Combine the external cancel signal with a per-request timeout.
-  const ctrl = new AbortController();
-  const onExternalAbort = () => ctrl.abort();
-  if (opts.signal) {
-    if (opts.signal.aborted) ctrl.abort();
-    else opts.signal.addEventListener('abort', onExternalAbort, { once: true });
-  }
-  const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 30000);
-
-  const aborted = () => ctrl.signal.aborted;
-  const finish = (result: ProxyResult): ExecuteResult => {
-    sandbox.attachResponse(result.status, result.statusText, result.rawText);
-    sandbox.runTests(tab.tests);
-    const { finalUrl, ...resData } = result;
-    return { response: { ...resData, testResults: sandbox.testResults }, finalUrl };
-  };
+  if (opts.signal?.aborted) return fail('cancelled', 'Request cancelled');
+  const onAbort = () => void cancelRequest(spec.requestId).catch(() => {});
+  opts.signal?.addEventListener('abort', onAbort, { once: true });
 
   try {
-    // forceDirect (Retry from browser) or remote app targeting localhost → skip proxy
-    const useDirect = opts.forceDirect || (isRemoteApp() && isLocalhostUrl(tab.url, vars));
+    const { meta, prefix } = await sendRequest(spec);
+    const data = toResponseData(meta, prefix);
 
-    if (useDirect) {
+    // Tests see the whole body even when the pane only holds the 2 MB prefix.
+    let testBody = data.rawText;
+    if (meta.truncated && tab.tests.trim()) {
       try {
-        return finish(await sendDirect(tab, vars, ctrl.signal));
-      } catch (e) {
-        if ((e as Error).name === 'AbortError' || aborted()) throw e;
-        return {
-          response: null,
-          error: { phase: 'send', message: opts.forceDirect ? DIRECT_FAIL_MSG : LOCALHOST_HELP_MSG },
-        };
+        testBody = decodeText(await getResponseBody(meta.responseId, 0));
+      } catch {
+        // Body evicted from the store: tests run against the prefix.
       }
     }
-
-    const proxied = await sendViaProxy(tab, vars, ctrl.signal, opts.cookieHeader);
-    const challenge = detectBotChallenge(proxied);
-    if (!challenge) return finish(proxied);
-
-    // A bot-wall interstitial — the origin never saw this request.
-    // directEligible: a clean browser-direct retry is possible (no cookie the
-    //   browser can't replay). Method-independent — the user may retry a POST
-    //   manually, accepting the re-send.
-    // autoOk: only silently auto-retry idempotent methods with no cookie conflict.
-    const explicitCookie = tab.headers.some((h) => h.key?.toLowerCase() === 'cookie' && h.value);
-    const directEligible = !opts.cookieHeader && !explicitCookie;
-    const autoOk = SAFE_METHODS.includes(tab.method) && directEligible;
-
-    if (opts.directFallback === 'auto' && autoOk) {
-      try {
-        return finish(await sendDirect(tab, vars, ctrl.signal));
-      } catch (e) {
-        if ((e as Error).name === 'AbortError' || aborted()) throw e;
-        return { response: null, finalUrl: proxied.finalUrl, error: { phase: 'send', message: DIRECT_FAIL_MSG } };
-      }
-    }
-
-    // Not auto-retried (unsafe method, cookie conflict, or fallback off) — let the
-    // caller decide whether to show a Retry button or a failed run item.
-    return {
-      response: null,
-      finalUrl: proxied.finalUrl,
-      challenge: { vendor: challenge.vendor, method: tab.method, directEligible },
-    };
+    sandbox.attachResponse(data.status, data.statusText, testBody);
+    sandbox.runTests(tab.tests);
+    return { response: { ...data, testResults: sandbox.testResults }, finalUrl: spec.url };
   } catch (e) {
-    const wasAborted = (e as Error).name === 'AbortError' || aborted();
-    return {
-      response: null,
-      error: { phase: 'send', message: wasAborted ? 'Request cancelled or timed out' : (e as Error).message },
-    };
+    const { kind, message } = toNativeError(e);
+    return fail(kind, message);
   } finally {
-    clearTimeout(timer);
-    opts.signal?.removeEventListener('abort', onExternalAbort);
+    opts.signal?.removeEventListener('abort', onAbort);
   }
 }

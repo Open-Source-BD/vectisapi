@@ -4,9 +4,8 @@ import type { TabState, Protocol, RealtimeState, RtMessage } from '../../types';
 import { generateId } from '../../lib/id';
 import { isTabDirty } from '../../lib/tabDirty';
 import { closeConnection, openWebSocket, openSse, sendWebSocket, byteLen } from '../../lib/realtimeConnection';
-import { buildProxyRequest } from '../../lib/buildProxyRequest';
+import { buildRequestSpec } from '../../lib/native/buildRequestSpec';
 import { findNode } from '../../lib/collectionTree';
-import { cookieHeaderFor } from '../../lib/cookies';
 import { resolveEnv } from '../../lib/envResolver';
 import { clone, createDefaultTab, type PendingSave, selectActiveVars, RT_LOG_CAP, RT_MSG_MAX } from './helpers';
 
@@ -204,16 +203,22 @@ export const createTabsSlice: StateCreator<StoreState, [], [], TabsSlice> = (set
     const state = get();
     const tab = state.tabs.find((t) => t.id === tabId);
     if (!tab) return;
-    const built = buildProxyRequest(tab, selectActiveVars(state));
-    const cookie = cookieHeaderFor(state.cookieJar, built.finalUrl);
+    // Interim until SSE moves to rt_open_sse (Task 12): same request assembly as
+    // HTTP sends; jar cookies are no longer injected here (the Rust jar owns them).
+    const spec = buildRequestSpec(tab, selectActiveVars(state), tabId);
     const prevId = state.realtime[tabId]?.lastEventId;
 
-    const proxyHeaders = new Headers(built.headers);
-    proxyHeaders.set('X-Proxy-Target-Url', built.finalUrl);
-    proxyHeaders.set('X-Proxy-Method', built.method);
-    if (cookie) proxyHeaders.set('X-Proxy-Cookie', cookie);
+    const proxyHeaders = new Headers();
+    spec.headers.forEach(([k, v]) => proxyHeaders.append(k, v));
+    proxyHeaders.set('X-Proxy-Target-Url', spec.url);
+    proxyHeaders.set('X-Proxy-Method', spec.method);
     if (prevId) proxyHeaders.set('X-Proxy-Last-Event-Id', prevId);
-    if (built.isFormData) proxyHeaders.delete('Content-Type');
+    const sseBody =
+      spec.body.type === 'text'
+        ? spec.body.value
+        : spec.body.type === 'urlEncoded'
+          ? new URLSearchParams(spec.body.value)
+          : undefined;
 
     set((s) => ({
       realtime: {
@@ -223,7 +228,7 @@ export const createTabsSlice: StateCreator<StoreState, [], [], TabsSlice> = (set
     }));
     openSse(
       tabId,
-      { headers: proxyHeaders, body: built.body },
+      { headers: proxyHeaders, body: sseBody },
       {
         onStatus: (status, info) =>
           set((s) => {

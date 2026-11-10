@@ -6,7 +6,6 @@ import { generateTypes, TYPE_LANGS, type TypeLang } from '../../lib/jsonToTypes'
 import { parseSetCookie } from '../../lib/cookies';
 import { diffLines, diffStats } from '../../lib/diffLines';
 import { parseJsonBody } from '../../lib/parseJsonBody';
-import { executeActiveSend } from '../../lib/sendActive';
 import { CodeView, JsonTree } from '@/components/ui';
 
 /** Pretty-print a body for stable diffing (indented JSON when parseable). */
@@ -28,10 +27,7 @@ export function ResponsePane({ onExpand, onCollapse, inModal }: ResponsePaneProp
   const tab = useApiStore(selectActiveTab);
   const updateActiveTab = useApiStore((s) => s.updateActiveTab);
   const setResponseModalOpen = useApiStore((s) => s.setResponseModalOpen);
-  const setCookieModalOpen = useApiStore((s) => s.setCookieModalOpen);
-  const isLoading = useApiStore((s) => s.isLoading);
   const res = tab.response;
-  const challenge = tab.challenge;
   const [typeLang, setTypeLang] = useState<TypeLang>('typescript');
   const [bodyView, setBodyView] = useState<'pretty' | 'raw'>('pretty');
   const [bodySearch, setBodySearch] = useState('');
@@ -75,17 +71,6 @@ export function ResponsePane({ onExpand, onCollapse, inModal }: ResponsePaneProp
           </span>
           <span>{res ? `${res.status} ${res.statusText}` : 'Waiting for request...'}</span>
         </div>
-        {res?.transport === 'direct' && (
-          <span
-            className="transport-badge"
-            title="Sent directly from your browser to bypass a bot wall. Response headers are limited by CORS, and cookies were not sent."
-          >
-            <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>
-              open_in_browser
-            </span>
-            Sent from your browser
-          </span>
-        )}
         <div className="metrics">
           <div>
             Time: <span className="value">{res?.timeTaken || '-'}</span> ms
@@ -166,54 +151,7 @@ export function ResponsePane({ onExpand, onCollapse, inModal }: ResponsePaneProp
       </div>
 
       <div className="response-content">
-        {challenge && (
-          <div className="empty-state challenge-panel" aria-live="polite">
-            <span className="material-symbols-outlined" style={{ fontSize: '44px', color: 'var(--warning)' }}>
-              shield
-            </span>
-            <span className="challenge-title">Blocked by {challenge.vendor}</span>
-            <p className="challenge-msg">
-              This target rejects requests from the server&apos;s datacenter IP with a bot wall.
-              {challenge.directEligible
-                ? ' You can resend it straight from your browser (your own IP), like Postman does.'
-                : ' This request also uses cookies a browser can’t send to another site, so a direct retry won’t carry them.'}
-            </p>
-            {isLoading ? (
-              <button className="md-filled-btn" disabled>
-                <span className="material-symbols-outlined spin" style={{ fontSize: '18px' }}>
-                  progress_activity
-                </span>
-                Retrying from browser…
-              </button>
-            ) : challenge.directEligible ? (
-              <button className="md-filled-btn" onClick={() => void executeActiveSend({ forceDirect: true })}>
-                <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>
-                  open_in_browser
-                </span>
-                Retry from browser
-              </button>
-            ) : (
-              <div className="challenge-actions">
-                <button className="md-filled-btn" onClick={() => setCookieModalOpen(true)}>
-                  <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>
-                    cookie
-                  </span>
-                  Manage cookies
-                </button>
-                <button className="md-text-btn" onClick={() => void executeActiveSend({ forceDirect: true })}>
-                  Retry from browser anyway (cookies won’t be sent)
-                </button>
-              </div>
-            )}
-            {challenge.retryError && !isLoading && (
-              <p className="challenge-error" role="status">
-                {challenge.retryError}
-              </p>
-            )}
-          </div>
-        )}
-
-        {!res && !challenge && (
+        {!res && (
           <div className="empty-state">
             <span className="material-symbols-outlined" style={{ fontSize: '48px', opacity: 0.5 }}>
               cloud_download

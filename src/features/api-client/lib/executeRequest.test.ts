@@ -1,51 +1,58 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
-vi.mock('./proxyClient', async (orig) => ({
-  ...(await orig<typeof import('./proxyClient')>()),
-  sendViaProxy: vi.fn(),
-  sendDirect: vi.fn(),
+vi.mock('./native/invoke', () => ({
+  sendRequest: vi.fn(),
+  cancelRequest: vi.fn(),
+  getResponseBody: vi.fn(),
 }));
 
-import { sendViaProxy, sendDirect } from './proxyClient';
+import { sendRequest, cancelRequest, getResponseBody } from './native/invoke';
 import { executeRequest } from './executeRequest';
 import { createDefaultTab } from '../store/useApiStore';
+import type { HttpRequestSpec, ResponseMeta } from '../types';
 
-const mockSend = sendViaProxy as unknown as ReturnType<typeof vi.fn>;
-const mockDirect = sendDirect as unknown as ReturnType<typeof vi.fn>;
+const mockSend = vi.mocked(sendRequest);
+const mockCancel = vi.mocked(cancelRequest);
+const mockBody = vi.mocked(getResponseBody);
 
-function proxyRes(body: string, status = 200, extra: Record<string, unknown> = {}) {
-  return {
-    ok: status < 400,
-    status,
+function nativeRes(body: string, over: Partial<ResponseMeta> = {}) {
+  const prefix = new TextEncoder().encode(body);
+  const meta: ResponseMeta = {
+    responseId: 'resp-1',
+    status: 200,
     statusText: 'OK',
-    timeTaken: 5,
-    size: body.length,
-    rawText: body,
-    headers: {},
-    finalUrl: 'http://example.test',
-    transport: 'proxy',
-    ...extra,
+    httpVersion: 'HTTP/1.1',
+    headers: [],
+    remoteAddr: null,
+    finalUrl: 'http://example.test/',
+    size: prefix.length,
+    timing: { totalMs: 5, ttfbMs: 2 },
+    truncated: false,
+    ...over,
   };
+  return { meta, prefix };
 }
 
-const CF_BODY = '<title>Just a moment...</title> challenges.cloudflare.com';
+const sentSpec = (call = 0) => mockSend.mock.calls[call][0] as HttpRequestSpec;
 
 beforeEach(() => {
   mockSend.mockReset();
-  mockDirect.mockReset();
+  mockCancel.mockReset().mockResolvedValue(true);
+  mockBody.mockReset();
 });
 
 describe('executeRequest', () => {
   it('happy path returns response and runs tests', async () => {
-    mockSend.mockResolvedValue(proxyRes('{"id":1}'));
+    mockSend.mockResolvedValue(nativeRes('{"id":1}'));
     const tab = createDefaultTab();
     tab.url = 'http://example.test';
     tab.tests = 'pm.test("ok", () => pm.expect(pm.response.code).to.eql(200))';
     const r = await executeRequest(tab, []);
     expect(r.response?.status).toBe(200);
-    expect(r.response?.transport).toBe('proxy');
+    expect(r.response?.rawText).toBe('{"id":1}');
     expect(r.response?.testResults[0]).toMatchObject({ name: 'ok', pass: true });
-    expect(mockDirect).not.toHaveBeenCalled();
+    expect(r.finalUrl).toBe('http://example.test/');
+    expect(r.error).toBeUndefined();
   });
 
   it('pre-request script error returns {phase:pre-request} and does not send', async () => {
@@ -57,87 +64,118 @@ describe('executeRequest', () => {
     expect(mockSend).not.toHaveBeenCalled();
   });
 
-  it('pre-request variable mutation reaches sendViaProxy (latent bug fix)', async () => {
-    mockSend.mockResolvedValue(proxyRes('{}'));
+  it('pre-request variable mutation reaches the request spec', async () => {
+    mockSend.mockResolvedValue(nativeRes('{}'));
     const tab = createDefaultTab();
+    tab.url = 'http://example.test/{{tok}}';
     tab.scripts = 'pm.environment.set("tok", "T1")';
     await executeRequest(tab, []);
-    const varsArg = mockSend.mock.calls[0][1] as { key: string; value: string }[];
-    expect(varsArg.find((v) => v.key === 'tok')?.value).toBe('T1');
+    expect(sentSpec().url).toBe('http://example.test/T1');
   });
 
-  it('send failure returns {phase:send} with null response', async () => {
-    mockSend.mockRejectedValueOnce(new Error('network down'));
+  it('passes the timeout into the spec', async () => {
+    mockSend.mockResolvedValue(nativeRes('{}'));
     const tab = createDefaultTab();
+    tab.url = 'http://example.test';
+    await executeRequest(tab, [], { timeoutMs: 1500 });
+    expect(sentSpec().timeoutMs).toBe(1500);
+  });
+
+  it('unresolved var url yields error response', async () => {
+    mockSend.mockRejectedValue({
+      kind: 'invalid_url',
+      message: 'invalid URL "{{base}}/x": relative URL without a base',
+    });
+    const tab = createDefaultTab();
+    tab.url = '{{base}}/x';
     const r = await executeRequest(tab, []);
-    expect(r.response).toBeNull();
+    expect(sentSpec().url).toBe('{{base}}/x');
+    expect(r.response).toMatchObject({
+      ok: false,
+      status: 0,
+      statusText: 'Error',
+      rawText: 'invalid URL "{{base}}/x": relative URL without a base',
+      errorKind: 'invalid_url',
+      testResults: [],
+    });
+    expect(r.error).toEqual({ phase: 'send', message: 'invalid URL "{{base}}/x": relative URL without a base' });
+  });
+
+  it('a non-native rejection maps to kind other', async () => {
+    mockSend.mockRejectedValue(new Error('ipc down'));
+    const tab = createDefaultTab();
+    tab.url = 'http://example.test';
+    const r = await executeRequest(tab, []);
+    expect(r.response).toMatchObject({ status: 0, rawText: 'ipc down', errorKind: 'other' });
+  });
+
+  it('tests receive full body when truncated', async () => {
+    const full = JSON.stringify({ big: 'x'.repeat(50), tail: 'END' });
+    mockSend.mockResolvedValue(nativeRes(full.slice(0, 10), { truncated: true, size: full.length }));
+    mockBody.mockResolvedValue(new TextEncoder().encode(full));
+    const tab = createDefaultTab();
+    tab.url = 'http://example.test';
+    tab.tests = 'pm.test("tail", () => pm.expect(pm.response.json().tail).to.eql("END"))';
+    const r = await executeRequest(tab, []);
+    expect(mockBody).toHaveBeenCalledTimes(1);
+    expect(mockBody).toHaveBeenCalledWith('resp-1', 0);
+    expect(r.response?.testResults[0]).toMatchObject({ name: 'tail', pass: true });
+    // The pane keeps showing the inline prefix.
+    expect(r.response?.rawText).toBe(full.slice(0, 10));
+    expect(r.response?.truncated).toBe(true);
+  });
+
+  it('does not fetch the full body when there are no tests or it is not truncated', async () => {
+    mockSend.mockResolvedValue(nativeRes('abc', { truncated: true, size: 10_000_000 }));
+    const tab = createDefaultTab();
+    tab.url = 'http://example.test';
+    await executeRequest(tab, []);
+    mockSend.mockResolvedValue(nativeRes('abc'));
+    tab.tests = 'pm.test("t", () => {})';
+    await executeRequest(tab, []);
+    expect(mockBody).not.toHaveBeenCalled();
+  });
+
+  it('abort signal cancels', async () => {
+    let rejectSend: (e: unknown) => void = () => {};
+    mockSend.mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectSend = reject;
+        }),
+    );
+    mockCancel.mockImplementation(async () => {
+      rejectSend({ kind: 'cancelled', message: 'request cancelled' });
+      return true;
+    });
+    const ctrl = new AbortController();
+    const tab = createDefaultTab();
+    tab.url = 'http://example.test';
+    const pending = executeRequest(tab, [], { signal: ctrl.signal });
+    await vi.waitFor(() => expect(mockSend).toHaveBeenCalled());
+    ctrl.abort();
+    const r = await pending;
+    expect(mockCancel).toHaveBeenCalledWith(sentSpec().requestId);
+    expect(r.response).toMatchObject({ status: 0, errorKind: 'cancelled' });
     expect(r.error?.phase).toBe('send');
   });
 
+  it('an already-aborted signal does not send', async () => {
+    const ctrl = new AbortController();
+    ctrl.abort();
+    const tab = createDefaultTab();
+    tab.url = 'http://example.test';
+    const r = await executeRequest(tab, [], { signal: ctrl.signal });
+    expect(mockSend).not.toHaveBeenCalled();
+    expect(r.response).toMatchObject({ status: 0, errorKind: 'cancelled' });
+  });
+
   it('forwards script env writes to onSetVar', async () => {
-    mockSend.mockResolvedValue(proxyRes('{}'));
+    mockSend.mockResolvedValue(nativeRes('{}'));
     const onSet = vi.fn();
     const tab = createDefaultTab();
     tab.scripts = 'pm.environment.set("a", "b")';
     await executeRequest(tab, [], { onSetVar: onSet });
     expect(onSet).toHaveBeenCalledWith('a', 'b');
-  });
-
-  // --- Bot-wall fallback ---
-
-  it('GET challenge + directFallback:auto + no cookie → auto-retries browser-direct', async () => {
-    mockSend.mockResolvedValue(proxyRes(CF_BODY, 403));
-    mockDirect.mockResolvedValue(proxyRes('{"real":true}', 200, { transport: 'direct' }));
-    const tab = createDefaultTab(); // GET by default
-    const r = await executeRequest(tab, [], { directFallback: 'auto' });
-    expect(mockDirect).toHaveBeenCalledTimes(1);
-    expect(r.response?.transport).toBe('direct');
-    expect(r.response?.rawText).toBe('{"real":true}');
-    expect(r.challenge).toBeUndefined();
-  });
-
-  it('GET challenge + jar cookie → reports challenge, does NOT auto-direct', async () => {
-    mockSend.mockResolvedValue(proxyRes(CF_BODY, 403));
-    const tab = createDefaultTab();
-    const r = await executeRequest(tab, [], { directFallback: 'auto', cookieHeader: 'sid=1' });
-    expect(mockDirect).not.toHaveBeenCalled();
-    expect(r.response).toBeNull();
-    expect(r.challenge).toMatchObject({ vendor: 'Cloudflare', directEligible: false });
-  });
-
-  it('POST challenge + auto → reports challenge (eligible) but does NOT auto-send', async () => {
-    mockSend.mockResolvedValue(proxyRes(CF_BODY, 403));
-    const tab = createDefaultTab();
-    tab.method = 'POST';
-    const r = await executeRequest(tab, [], { directFallback: 'auto' });
-    expect(mockDirect).not.toHaveBeenCalled();
-    expect(r.challenge).toMatchObject({ vendor: 'Cloudflare', method: 'POST', directEligible: true });
-  });
-
-  it('challenge with directFallback off (runner default) → reports challenge', async () => {
-    mockSend.mockResolvedValue(proxyRes(CF_BODY, 403));
-    const tab = createDefaultTab();
-    const r = await executeRequest(tab, []); // no directFallback → 'off'
-    expect(mockDirect).not.toHaveBeenCalled();
-    expect(r.challenge?.vendor).toBe('Cloudflare');
-  });
-
-  it('forceDirect sends straight via sendDirect (manual retry)', async () => {
-    mockDirect.mockResolvedValue(proxyRes('{"direct":1}', 200, { transport: 'direct' }));
-    const tab = createDefaultTab();
-    const r = await executeRequest(tab, [], { forceDirect: true });
-    expect(mockSend).not.toHaveBeenCalled();
-    expect(mockDirect).toHaveBeenCalledTimes(1);
-    expect(r.response?.transport).toBe('direct');
-  });
-
-  it('auto-direct retry that throws (CORS) returns the honest failure message', async () => {
-    mockSend.mockResolvedValue(proxyRes(CF_BODY, 403));
-    mockDirect.mockRejectedValueOnce(new TypeError('Failed to fetch'));
-    const tab = createDefaultTab();
-    const r = await executeRequest(tab, [], { directFallback: 'auto' });
-    expect(r.response).toBeNull();
-    expect(r.error?.phase).toBe('send');
-    expect(r.error?.message).toMatch(/browser could not reach the target/i);
   });
 });

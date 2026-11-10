@@ -1,6 +1,5 @@
 import type { EnvVar, HttpMethod, RequestNode, TestResult } from '../types';
 import { executeRequest } from './executeRequest';
-import { resolveEnv } from './envResolver';
 
 /** One executed request within a run (per iteration). */
 export interface RunResultItem {
@@ -28,10 +27,8 @@ export interface RunConfig {
   signal: AbortSignal;
   onResult: (item: RunResultItem) => void;
   onProgress: (current: number, total: number) => void;
-  /** Cookie header for a resolved URL (shared jar). */
-  cookieHeaderFor?: (url: string) => string;
-  /** Capture a response Set-Cookie into the jar. */
-  onCookies?: (url: string, setCookieHeader: string | undefined) => void;
+  /** Per-request timeout in ms (0 = none). Omitted = the settings timeout. */
+  timeoutMs?: number;
 }
 
 /**
@@ -59,14 +56,13 @@ export async function runCollection(cfg: RunConfig): Promise<void> {
     for (const node of cfg.requests) {
       if (cfg.signal.aborted) return;
       const seed: EnvVar[] = [...bag.entries()].map(([key, value]) => ({ id: `v:${key}`, key, value }));
-      const resolvedUrl = cfg.cookieHeaderFor ? resolveEnv(node.request.url, seed) : '';
+      // Cookies are attached and captured by the native jar.
       const res = await executeRequest(node.request, seed, {
         iterationData: row,
         signal: cfg.signal,
         onSetVar: (k, v) => bag.set(k, v),
-        cookieHeader: cfg.cookieHeaderFor?.(resolvedUrl),
+        timeoutMs: cfg.timeoutMs,
       });
-      cfg.onCookies?.(res.finalUrl ?? resolvedUrl, res.response?.headers['set-cookie']);
       done++;
       cfg.onResult({
         requestId: node.id,
@@ -77,13 +73,7 @@ export async function runCollection(cfg: RunConfig): Promise<void> {
         ok: res.response?.ok ?? false,
         timeTaken: res.response?.timeTaken ?? 0,
         testResults: res.response?.testResults ?? [],
-        // The runner never auto-switches transport (deterministic runs). A bot-wall
-        // challenge is reported as a failed item; retry it as a single send.
-        error:
-          res.error?.message ??
-          (res.challenge
-            ? `Blocked by ${res.challenge.vendor} bot wall — retry this request individually to send from your browser`
-            : undefined),
+        error: res.error?.message,
       });
       cfg.onProgress(done, total);
     }

@@ -1,13 +1,4 @@
-import type {
-  HttpMethod,
-  RequestBody,
-  ResponseData,
-  ChallengeInfo,
-  KvItem,
-  AuthConfig,
-  RequestSubTab,
-  ResponseSubTab,
-} from './http';
+import type { HttpMethod, RequestBody, ResponseData, KvItem, AuthConfig, RequestSubTab, ResponseSubTab } from './http';
 import type { Protocol } from './realtime';
 
 export interface TabState {
@@ -25,8 +16,6 @@ export interface TabState {
   response: ResponseData | null;
   /** Previous run's response, kept in-memory for the Diff view (not persisted). */
   prevResponse?: ResponseData | null;
-  /** Bot-wall challenge pending user action (Retry from browser). Transient, not persisted. */
-  challenge?: ChallengeInfo | null;
   activeSubTab: RequestSubTab;
   activeResTab: ResponseSubTab;
   /** Id of the saved RequestNode this tab was opened from (for Save vs Save As). */

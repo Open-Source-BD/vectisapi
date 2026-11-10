@@ -1,16 +1,39 @@
+import { useCallback, useEffect, useState } from 'react';
 import { useApiStore } from '../../store/useApiStore';
+import { cookiesClear, cookiesClearDomain, cookiesList, type CookieView } from '../../lib/native/invoke';
 
-/** Manage the persisted cookie jar: view cookies per host, clear by host or all. */
+/** "session" for session cookies, else a short local expiry date/time. */
+function expiryHint(expires: number | null): string {
+  if (expires === null) return 'session';
+  return `expires ${new Date(expires * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}`;
+}
+
+/** Manage the native cookie jar: view cookies per domain, clear by domain or all. */
 export function CookiesModal() {
   const isOpen = useApiStore((s) => s.isCookieModalOpen);
   const setOpen = useApiStore((s) => s.setCookieModalOpen);
-  const jar = useApiStore((s) => s.cookieJar);
-  const clearCookies = useApiStore((s) => s.clearCookies);
+  const [cookies, setCookies] = useState<CookieView[]>([]);
+
+  const reload = useCallback(() => {
+    cookiesList()
+      .then(setCookies)
+      .catch(() => setCookies([]));
+  }, []);
+
+  // Read the jar each time the modal opens (it changes on every send).
+  useEffect(() => {
+    if (isOpen) reload();
+  }, [isOpen, reload]);
+
   if (!isOpen) return null;
 
-  const domains = Object.keys(jar)
-    .filter((d) => jar[d]?.length)
-    .sort();
+  const clearCookies = (domain?: string) => {
+    void (domain ? cookiesClearDomain(domain) : cookiesClear()).catch(() => {}).finally(reload);
+  };
+
+  const jar: Record<string, CookieView[]> = {};
+  for (const c of cookies) (jar[c.domain] ??= []).push(c);
+  const domains = Object.keys(jar).sort();
 
   return (
     <div
@@ -54,9 +77,11 @@ export function CookiesModal() {
                 </button>
               </div>
               {jar[domain].map((c) => (
-                <div key={c.name} className="cookies-row">
+                <div key={`${c.path}\u0000${c.name}`} className="cookies-row">
                   <span className="cookies-name">{c.name}</span>
                   <span className="cookies-value">{c.value}</span>
+                  {c.path !== '/' && <span className="cookies-value">{c.path}</span>}
+                  <span className="cookies-value">{expiryHint(c.expires)}</span>
                 </div>
               ))}
             </div>

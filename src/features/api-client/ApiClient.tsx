@@ -37,6 +37,11 @@ export function ApiClient() {
   useEffect(() => {
     useApiStore.getState().restoreWorkspace();
   }, []);
+
+  // Native settings (default request timeout, ...) — fetched once at startup.
+  useEffect(() => {
+    void useApiStore.getState().loadSettings();
+  }, []);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const splitRef = useRef<HTMLDivElement>(null);
   const [requestHeight, setRequestHeight] = useState(340);

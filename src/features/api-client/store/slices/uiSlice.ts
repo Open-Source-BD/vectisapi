@@ -2,6 +2,7 @@ import type { StateCreator } from 'zustand';
 import type { StoreState } from './types';
 import type { SidebarTab } from '../../types';
 import type { CodeLang } from '../../lib/codegen';
+import { getSettings, type Settings } from '../../lib/native/invoke';
 
 export type Theme = 'light' | 'dark';
 export type WorkspaceStatus = 'disconnected' | 'connected' | 'reconnect' | 'unsupported';
@@ -22,6 +23,8 @@ export interface UiSlice {
   codeLang: CodeLang;
   codeSnippet: string;
   copied: boolean;
+  /** Native app settings, loaded once at startup (`null` until loaded). */
+  settings: Settings | null;
 
   // UI setters
   toggleExpanded: (id: string) => void;
@@ -41,6 +44,7 @@ export interface UiSlice {
   setCopied: (v: boolean) => void;
   toggleTheme: () => void;
   setTheme: (t: Theme) => void;
+  loadSettings: () => Promise<void>;
 }
 
 export const createUiSlice: StateCreator<StoreState, [], [], UiSlice> = (set) => ({
@@ -59,6 +63,7 @@ export const createUiSlice: StateCreator<StoreState, [], [], UiSlice> = (set) =>
   codeLang: 'curl' as CodeLang,
   codeSnippet: '',
   copied: false,
+  settings: null,
 
   toggleExpanded: (id) => set((s) => ({ expanded: { ...s.expanded, [id]: !s.expanded[id] } })),
   setCollectionSearch: (collectionSearch) => set({ collectionSearch }),
@@ -77,4 +82,11 @@ export const createUiSlice: StateCreator<StoreState, [], [], UiSlice> = (set) =>
   setCopied: (copied) => set({ copied }),
   toggleTheme: () => set((s) => ({ theme: s.theme === 'light' ? 'dark' : 'light' })),
   setTheme: (theme) => set({ theme }),
+  loadSettings: async () => {
+    try {
+      set({ settings: await getSettings() });
+    } catch {
+      // Not running under Tauri (or IPC failed): the engine still applies its own defaults.
+    }
+  },
 });

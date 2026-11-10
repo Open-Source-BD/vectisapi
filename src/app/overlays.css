@@ -57,41 +57,6 @@
   gap: 8px;
 }
 
-/* Bot-wall challenge panel */
-.challenge-panel {
-  padding: 32px 24px;
-  text-align: center;
-}
-.challenge-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--md-sys-color-on-surface);
-}
-.challenge-msg {
-  max-width: 46ch;
-  margin: 0;
-  line-height: 1.5;
-}
-.challenge-actions {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-}
-.challenge-error {
-  max-width: 46ch;
-  margin: 4px 0 0;
-  font-size: 13px;
-  line-height: 1.45;
-  color: var(--md-sys-color-error);
-}
-.challenge-panel .md-filled-btn,
-.challenge-panel .md-text-btn {
-  min-height: 44px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
 .material-symbols-outlined.spin {
   animation: rt-spin 0.9s linear infinite;
 }

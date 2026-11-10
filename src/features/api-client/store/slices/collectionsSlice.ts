@@ -1,12 +1,10 @@
 import type { StateCreator } from 'zustand';
 import type { StoreState } from './types';
 import type { Collection, TabState, Environment, EnvVar, HistoryItem } from '../../types';
-import type { CookieJar } from '../../lib/cookies';
 import { generateId } from '../../lib/id';
 import * as tree from '../../lib/collectionTree';
 import { runCollection, type RunResultItem } from '../../lib/collectionRunner';
 import { parseData } from '../../lib/parseData';
-import { cookieHeaderFor, mergeSetCookie } from '../../lib/cookies';
 import { clone, createDefaultTab, snapshotRequest, selectActiveVars } from './helpers';
 
 function migrateEnvironments(raw: unknown): Environment[] {
@@ -20,7 +18,6 @@ export interface CollectionsSlice {
   collections: Collection[];
   expanded: Record<string, boolean>;
   collectionSearch: string;
-  cookieJar: CookieJar;
   moveNodeId: string | null;
   hydrated: boolean;
 
@@ -55,7 +52,6 @@ export interface CollectionsSlice {
     tabs?: TabState[];
     activeTabId?: string;
     theme?: string;
-    cookieJar?: CookieJar;
   }) => void;
 
   // Collection Runner
@@ -69,10 +65,6 @@ export interface CollectionsSlice {
   startRun: (opts: { iterations: number; dataText: string }) => Promise<void>;
   cancelRun: () => void;
 
-  // Cookies
-  captureCookies: (url: string, setCookieHeader: string | undefined) => void;
-  clearCookies: (domain?: string) => void;
-
   // Move modal
   openMoveModal: (nodeId: string) => void;
   closeMoveModal: () => void;
@@ -84,7 +76,6 @@ export const createCollectionsSlice: StateCreator<StoreState, [], [], Collection
   collections: [],
   expanded: {},
   collectionSearch: '',
-  cookieJar: {},
   moveNodeId: null,
   hydrated: false,
   runnerNodeId: null,
@@ -249,7 +240,6 @@ export const createCollectionsSlice: StateCreator<StoreState, [], [], Collection
       tabs,
       activeTabId,
       theme: data.theme === 'dark' ? 'dark' : 'light',
-      cookieJar: data.cookieJar && typeof data.cookieJar === 'object' ? data.cookieJar : {},
       expanded,
       hydrated: true,
     });
@@ -305,8 +295,7 @@ export const createCollectionsSlice: StateCreator<StoreState, [], [], Collection
       signal: runAbort.signal,
       onResult: (item) => set((s) => ({ runnerResults: [...s.runnerResults, item] })),
       onProgress: (current, total) => set({ runnerProgress: { current, total } }),
-      cookieHeaderFor: (url) => cookieHeaderFor(get().cookieJar, url),
-      onCookies: (url, sc) => get().captureCookies(url, sc),
+      timeoutMs: state.settings?.timeoutMs,
     });
 
     runAbort = null;
@@ -318,19 +307,6 @@ export const createCollectionsSlice: StateCreator<StoreState, [], [], Collection
     runAbort = null;
     set({ runnerRunning: false });
   },
-
-  // --- Cookies ---
-
-  captureCookies: (url, setCookieHeader) =>
-    set((s) => ({ cookieJar: mergeSetCookie(s.cookieJar, url, setCookieHeader) })),
-
-  clearCookies: (domain) =>
-    set((s) => {
-      if (!domain) return { cookieJar: {} };
-      const next = { ...s.cookieJar };
-      delete next[domain];
-      return { cookieJar: next };
-    }),
 
   openMoveModal: (moveNodeId) => set({ moveNodeId, isMoveModalOpen: true }),
   closeMoveModal: () => set({ isMoveModalOpen: false, moveNodeId: null }),

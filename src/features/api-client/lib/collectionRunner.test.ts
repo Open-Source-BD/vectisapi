@@ -1,27 +1,34 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
-vi.mock('./proxyClient', async (orig) => ({
-  ...(await orig<typeof import('./proxyClient')>()),
-  sendViaProxy: vi.fn(),
+vi.mock('./native/invoke', () => ({
+  sendRequest: vi.fn(),
+  cancelRequest: vi.fn(),
+  getResponseBody: vi.fn(),
 }));
 
-import { sendViaProxy } from './proxyClient';
+import { sendRequest } from './native/invoke';
 import { runCollection, type RunResultItem } from './collectionRunner';
 import { createDefaultTab } from '../store/useApiStore';
-import type { RequestNode } from '../types';
+import type { HttpRequestSpec, RequestNode } from '../types';
 
-const mockSend = sendViaProxy as unknown as ReturnType<typeof vi.fn>;
+const mockSend = vi.mocked(sendRequest);
 
 function proxyRes(body: string, status = 200) {
+  const prefix = new TextEncoder().encode(body);
   return {
-    ok: status < 400,
-    status,
-    statusText: 'OK',
-    timeTaken: 3,
-    size: body.length,
-    rawText: body,
-    headers: {},
-    finalUrl: 'http://example.test',
+    meta: {
+      responseId: 'r',
+      status,
+      statusText: 'OK',
+      httpVersion: 'HTTP/1.1',
+      headers: [] as [string, string][],
+      remoteAddr: null,
+      finalUrl: 'http://example.test/',
+      size: prefix.length,
+      timing: { totalMs: 3, ttfbMs: 1 },
+      truncated: false,
+    },
+    prefix,
   };
 }
 
@@ -56,15 +63,11 @@ describe('runCollection', () => {
   });
 
   it('chains: a test var set in req1 reaches req2', async () => {
-    const seen: { key: string; value: string }[][] = [];
-    mockSend.mockImplementation(async (_tab: unknown, vars: { key: string; value: string }[]) => {
-      seen.push(vars);
-      return proxyRes('{"id":"XYZ"}');
-    });
+    mockSend.mockResolvedValue(proxyRes('{"id":"XYZ"}'));
     const req1 = reqNode('login', { tests: 'pm.environment.set("id", pm.response.json().id)' });
-    const req2 = reqNode('use-token');
+    const req2 = reqNode('use-token', { url: 'http://example.test/{{id}}' });
     await run([req1, req2]);
-    expect(seen[1].find((v) => v.key === 'id')?.value).toBe('XYZ');
+    expect((mockSend.mock.calls[1][0] as HttpRequestSpec).url).toBe('http://example.test/XYZ');
   });
 
   it('continues after a failed request (continue-on-failure)', async () => {
@@ -77,16 +80,14 @@ describe('runCollection', () => {
   });
 
   it('iterates once per data row and exposes pm.iterationData', async () => {
-    const seenN: (string | undefined)[] = [];
-    mockSend.mockImplementation((async (...a: unknown[]) => {
-      const vars = a[1] as { key: string; value: string }[] | undefined;
-      seenN.push((vars ?? []).find((v) => v.key === 'n')?.value);
-      return proxyRes('{}');
-    }) as unknown as typeof sendViaProxy);
-    const req = reqNode('echo');
+    mockSend.mockResolvedValue(proxyRes('{}'));
+    const req = reqNode('echo', { url: 'http://example.test/{{n}}' });
     const { results } = await run([req], { dataRows: [{ n: '1' }, { n: '2' }] });
     expect(results).toHaveLength(2);
-    expect(seenN).toEqual(['1', '2']);
+    expect(mockSend.mock.calls.map((c) => (c[0] as HttpRequestSpec).url)).toEqual([
+      'http://example.test/1',
+      'http://example.test/2',
+    ]);
     expect(results.map((r) => r.iteration)).toEqual([1, 2]);
   });
 
@@ -107,13 +108,17 @@ describe('runCollection', () => {
     expect(mockSend).not.toHaveBeenCalled();
   });
 
-  it('reports a bot-wall challenge as a failed item without switching transport', async () => {
-    mockSend.mockResolvedValueOnce(proxyRes('<title>Just a moment...</title> challenges.cloudflare.com', 403));
+  it('reports a native send error as a failed item and continues', async () => {
+    mockSend.mockRejectedValueOnce({ kind: 'timeout', message: 'request timed out' });
     mockSend.mockResolvedValue(proxyRes('{}'));
-    const { results } = await run([reqNode('blocked'), reqNode('next')]);
-    expect(results[0]).toMatchObject({ name: 'blocked', status: 0, ok: false });
-    expect(results[0].error).toMatch(/Cloudflare bot wall/i);
-    // run continues to the next request (continue-on-failure)
+    const { results } = await run([reqNode('slow'), reqNode('next')]);
+    expect(results[0]).toMatchObject({ name: 'slow', status: 0, ok: false, error: 'request timed out' });
     expect(results[1]).toMatchObject({ name: 'next', status: 200 });
+  });
+
+  it('passes the run timeout into each request spec', async () => {
+    mockSend.mockResolvedValue(proxyRes('{}'));
+    await run([reqNode('a')], { timeoutMs: 777 });
+    expect((mockSend.mock.calls[0][0] as HttpRequestSpec).timeoutMs).toBe(777);
   });
 });
