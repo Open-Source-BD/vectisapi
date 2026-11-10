@@ -543,6 +543,46 @@ async fn default_user_agent_unless_set() {
     assert_eq!(&body[..], b"from-settings/2");
 }
 
+#[tokio::test]
+async fn invalid_proxy_settings_error_cleanly_without_panic() {
+    let base = server::spawn().await;
+    let bad = Settings {
+        proxy_url: Some("http://[not-a-host".into()),
+        ..Settings::default()
+    };
+
+    // Built with bad settings from the start: no client, sends error.
+    let (engine, pool, _) = setup_with(bad.clone());
+    let err = engine
+        .send(spec("GET", format!("{base}/json")))
+        .await
+        .unwrap_err();
+    assert_eq!(err.kind, ErrorKind::Other);
+    assert!(err.message.contains("proxy"), "{}", err.message);
+    assert!(pool.client().is_err());
+
+    // Good settings recover; switching back to bad ones errors again, then recovers.
+    pool.update(&Settings::default());
+    let (meta, _) = engine
+        .send(spec("GET", format!("{base}/json")))
+        .await
+        .unwrap();
+    assert_eq!(meta.status, 200);
+    pool.update(&bad);
+    let err = engine
+        .send(spec("GET", format!("{base}/json")))
+        .await
+        .unwrap_err();
+    assert_eq!(err.kind, ErrorKind::Other);
+    assert!(err.message.contains("proxy"), "{}", err.message);
+    pool.update(&Settings::default());
+    let (meta, _) = engine
+        .send(spec("GET", format!("{base}/json")))
+        .await
+        .unwrap();
+    assert_eq!(meta.status, 200);
+}
+
 async fn echo(
     engine: &HttpEngine,
     base: &str,

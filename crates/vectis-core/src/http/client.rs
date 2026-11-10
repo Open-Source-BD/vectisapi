@@ -11,7 +11,8 @@ use crate::settings::Settings;
 pub const DEFAULT_USER_AGENT: &str = concat!("VectisAPI/", env!("CARGO_PKG_VERSION"));
 
 struct Pooled {
-    client: reqwest::Client,
+    /// The last client that built successfully; `None` only if no settings ever built one.
+    client: Option<reqwest::Client>,
     /// Settings timeout; applied per request so a request can override it.
     timeout_ms: u64,
     /// Redirect cap when following is on; `None` when redirects are returned as-is.
@@ -32,17 +33,27 @@ pub struct ClientPool {
 impl ClientPool {
     pub fn new(settings: &Settings) -> Self {
         Self {
-            inner: Arc::new(RwLock::new(build(settings))),
+            inner: Arc::new(RwLock::new(build(settings, None))),
         }
     }
 
-    /// Rebuilds the client for new settings; in-flight requests keep the old one.
+    /// Rebuilds the client for new settings; in-flight requests keep the old one. When the new
+    /// settings cannot build a client, the previous client is kept and sends fail with the error
+    /// until valid settings are applied.
     pub fn update(&self, settings: &Settings) {
-        *self.inner.write() = build(settings);
+        let mut inner = self.inner.write();
+        let previous = inner.client.take();
+        *inner = build(settings, previous);
     }
 
-    pub fn client(&self) -> reqwest::Client {
-        self.inner.read().client.clone()
+    /// The shared client, or the settings error that keeps requests from being sent.
+    pub fn client(&self) -> Result<reqwest::Client, CoreError> {
+        self.check()?;
+        self.inner
+            .read()
+            .client
+            .clone()
+            .ok_or_else(|| CoreError::new(ErrorKind::Other, "HTTP client unavailable"))
     }
 
     /// Default request timeout from settings (`0` = none).
@@ -74,10 +85,11 @@ impl ClientPool {
     }
 }
 
-fn build(settings: &Settings) -> Pooled {
+/// Never panics: a failed build keeps `previous` (which may be `None`) and records the error.
+fn build(settings: &Settings, previous: Option<reqwest::Client>) -> Pooled {
     let (client, build_error) = match make_client(settings) {
-        Ok(client) => (client, None),
-        Err(msg) => (reqwest::Client::new(), Some(msg)),
+        Ok(client) => (Some(client), None),
+        Err(msg) => (previous, Some(msg)),
     };
     Pooled {
         client,

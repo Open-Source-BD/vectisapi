@@ -170,7 +170,7 @@ pub(crate) async fn send_following_redirects(
 ) -> Result<reqwest::Response, CoreError> {
     let no_body = BodySpec::None;
     let mut body = body;
-    let client = pool.client();
+    let client = pool.client()?;
     let max_redirects = pool.max_redirects();
     let timed_out = || CoreError::new(ErrorKind::Timeout, "request timed out");
     let mut redirects = 0;
