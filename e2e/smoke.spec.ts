@@ -15,6 +15,8 @@ test('can switch to collections sidebar', async ({ page }) => {
 
 test('can create a new tab', async ({ page }) => {
   await page.goto('/');
+  // The workspace loads asynchronously over IPC; count tabs once it has rendered.
+  await expect(page.locator('.req-tab').first()).toBeVisible();
   const count = await page.locator('.req-tab').count();
   await page.locator('[title*="New Tab"]').click();
   await expect(page.locator('.req-tab')).toHaveCount(count + 1);
