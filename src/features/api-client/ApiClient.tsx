@@ -19,7 +19,7 @@ import { SaveModal } from './components/modals/SaveModal';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useRequestRunner } from './hooks/useRequestRunner';
 import { exportData, parseImportFile } from './lib/importExport';
-import { usePersistence } from './store/persist';
+import { usePersistence } from './store/persistNative';
 import { selectActiveTab, useApiStore } from './store/useApiStore';
 
 export function ApiClient() {
@@ -78,7 +78,7 @@ export function ApiClient() {
   };
 
   // Match the prior SSR-safe mount guard: render nothing meaningful until
-  // localStorage has hydrated to avoid a hydration mismatch.
+  // the workspace has loaded from SQLite.
   if (!hydrated) {
     return (
       <div

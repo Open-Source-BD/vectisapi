@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import type { HttpRequestSpec, ResponseMeta } from '../../types';
 import { decodeSendFrame, toBytes, type RawBytes } from './decodeResponse';
@@ -72,4 +73,63 @@ export async function pickFile(): Promise<{ path: string; name: string } | null>
   const path = await open({ multiple: false, directory: false });
   if (!path) return null;
   return { path, name: path.split(/[\\/]/).pop() || path };
+}
+
+/** One persisted-entity write (mirrors `EntityOp` in crates/vectis-core/src/db; payloads are JSON strings). */
+export type EntityOp =
+  | { op: 'upsertCollection'; id: string; sort: number; json: string }
+  | { op: 'deleteCollection'; id: string }
+  | { op: 'upsertEnvironment'; id: string; sort: number; json: string }
+  | { op: 'deleteEnvironment'; id: string }
+  | { op: 'setGlobals'; json: string }
+  | { op: 'setActiveEnv'; id: string | null }
+  | { op: 'replaceTabs'; tabs: [string, string][] }
+  | { op: 'setUiState'; key: string; json: string }
+  | { op: 'clearHistory' }
+  | { op: 'deleteHistory'; id: string };
+
+/** Everything persisted, as loaded at startup (mirrors `WorkspaceSnapshot`, camelCase). */
+export interface WorkspaceSnapshot {
+  collections: unknown[];
+  environments: unknown[];
+  globals: unknown;
+  activeEnvId: string | null;
+  history: unknown[];
+  tabs: unknown[];
+  uiState: Record<string, unknown>;
+  settings: Settings;
+}
+
+export function loadWorkspace(): Promise<WorkspaceSnapshot> {
+  return invoke<WorkspaceSnapshot>('load_workspace');
+}
+
+export function saveEntities(ops: EntityOp[]): Promise<void> {
+  return invoke<void>('save_entities', { ops });
+}
+
+export function addHistoryNative(args: {
+  itemJson: string;
+  method: string;
+  url: string;
+  status: number;
+  durationMs: number;
+  ts: number;
+  limit?: number;
+}): Promise<void> {
+  return invoke<void>('add_history', { ...args, limit: args.limit ?? null });
+}
+
+/** Matching history items (JSON strings), newest first. */
+export function searchHistory(q: string, limit: number): Promise<string[]> {
+  return invoke<string[]>('search_history', { q, limit });
+}
+
+export function flushDone(): Promise<void> {
+  return invoke<void>('flush_done');
+}
+
+/** Subscribes to the window-close flush request; resolves to the unlisten function. */
+export function onFlush(handler: () => void): Promise<() => void> {
+  return listen('vectis://flush', () => handler());
 }

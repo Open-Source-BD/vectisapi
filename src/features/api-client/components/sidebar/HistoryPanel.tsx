@@ -1,6 +1,20 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useApiStore } from '../../store/useApiStore';
 import { filterHistory, groupHistoryByDate } from '../../lib/historyGroup';
+import { searchHistory } from '../../lib/native/invoke';
+import type { HistoryItem } from '../../types';
+import { WindowedList } from './WindowedList';
+
+const SEARCH_DEBOUNCE_MS = 150;
+const DEFAULT_SEARCH_LIMIT = 1000;
+/** Pixel heights of the two row kinds; rows are fixed so the list can be windowed. */
+const LABEL_HEIGHT = 28;
+const ROW_HEIGHT = 40;
+
+type Row = { kind: 'label'; label: string } | { kind: 'item'; item: HistoryItem };
+
+const rowHeight = (row: Row) => (row.kind === 'label' ? LABEL_HEIGHT : ROW_HEIGHT);
+const rowKey = (row: Row) => (row.kind === 'label' ? `label:${row.label}` : row.item.id);
 
 export function HistoryPanel() {
   // Captured once at mount; deterministic for the session and lint-pure.
@@ -13,8 +27,52 @@ export function HistoryPanel() {
   const replayHistory = useApiStore((s) => s.replayHistory);
   const openSaveModalForHistory = useApiStore((s) => s.openSaveModalForHistory);
 
-  const filtered = filterHistory(history, search);
-  const groups = groupHistoryByDate(filtered, now);
+  const limit = useApiStore((s) => s.settings?.historyLimit) ?? DEFAULT_SEARCH_LIMIT;
+
+  // A non-empty query is answered by SQLite (FTS); the in-memory filter covers the gap until the
+  // answer arrives and any search failure.
+  const query = search.trim();
+  const [found, setFound] = useState<{ query: string; items: HistoryItem[] } | null>(null);
+  useEffect(() => {
+    if (!query) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      searchHistory(query, limit)
+        .then((rows) => {
+          if (cancelled) return;
+          const items: HistoryItem[] = [];
+          for (const row of rows) {
+            try {
+              items.push(JSON.parse(row) as HistoryItem);
+            } catch {
+              // skip an unreadable row
+            }
+          }
+          setFound({ query, items });
+        })
+        .catch((e: unknown) => console.warn('search_history failed', e));
+    }, SEARCH_DEBOUNCE_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [query, limit]);
+
+  const filtered = useMemo(() => {
+    if (!query) return history;
+    if (found?.query !== query) return filterHistory(history, query);
+    const live = new Set(history.map((h) => h.id)); // a row deleted mid-search must disappear
+    return found.items.filter((h) => live.has(h.id));
+  }, [history, query, found]);
+
+  const rows = useMemo(() => {
+    const out: Row[] = [];
+    for (const group of groupHistoryByDate(filtered, now)) {
+      out.push({ kind: 'label', label: group.label });
+      for (const item of group.items) out.push({ kind: 'item', item });
+    }
+    return out;
+  }, [filtered, now]);
 
   return (
     <div className="history-panel">
@@ -51,30 +109,42 @@ export function HistoryPanel() {
         </button>
       </div>
 
-      <div className="tree-scroll">
-        {filtered.length === 0 && (
+      {filtered.length === 0 ? (
+        <div className="tree-scroll">
           <div className="sidebar-empty">
             <span className="material-symbols-outlined" style={{ fontSize: '36px', opacity: 0.5 }}>
               history
             </span>
             <span>{history.length === 0 ? 'No requests yet.' : 'No matches.'}</span>
           </div>
-        )}
-        {groups.map((group) => (
-          <div key={group.label}>
-            <div className="history-group-label">{group.label}</div>
-            {group.items.map((item) => (
-              <div key={item.id} className="history-row" onClick={() => replayHistory(item)}>
-                <span className={`h-method collection-method ${item.method.toLowerCase()}`}>{item.method}</span>
-                <span className="h-url">{item.url}</span>
-                <span className="h-status">{item.status || '—'}</span>
+        </div>
+      ) : (
+        <WindowedList
+          className="tree-scroll"
+          items={rows}
+          heightOf={rowHeight}
+          keyOf={rowKey}
+          renderItem={(row) =>
+            row.kind === 'label' ? (
+              <div className="history-group-label" style={{ height: LABEL_HEIGHT, boxSizing: 'border-box' }}>
+                {row.label}
+              </div>
+            ) : (
+              <div
+                className="history-row"
+                style={{ height: ROW_HEIGHT, boxSizing: 'border-box' }}
+                onClick={() => replayHistory(row.item)}
+              >
+                <span className={`h-method collection-method ${row.item.method.toLowerCase()}`}>{row.item.method}</span>
+                <span className="h-url">{row.item.url}</span>
+                <span className="h-status">{row.item.status || '—'}</span>
                 <div className="h-actions">
                   <button
                     className="md-icon-btn-small"
                     title="Save to collection"
                     onClick={(e) => {
                       e.stopPropagation();
-                      openSaveModalForHistory(item);
+                      openSaveModalForHistory(row.item);
                     }}
                   >
                     <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>
@@ -86,7 +156,7 @@ export function HistoryPanel() {
                     title="Delete"
                     onClick={(e) => {
                       e.stopPropagation();
-                      deleteHistoryItem(item.id);
+                      deleteHistoryItem(row.item.id);
                     }}
                   >
                     <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>
@@ -95,10 +165,10 @@ export function HistoryPanel() {
                   </button>
                 </div>
               </div>
-            ))}
-          </div>
-        ))}
-      </div>
+            )
+          }
+        />
+      )}
     </div>
   );
 }
