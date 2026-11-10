@@ -374,6 +374,14 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Path/expiry hint: a long value is what gets truncated, not the hint. */
+.cookies-path {
+  flex: none;
+  max-width: 30%;
+}
+.cookies-hint {
+  flex: none;
+}
 
 /* {{var}} autocomplete */
 .var-input-wrap {

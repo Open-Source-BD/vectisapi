@@ -85,8 +85,8 @@ export function CookiesModal() {
                 <div key={`${c.path}\u0000${c.name}`} className="cookies-row">
                   <span className="cookies-name">{c.name}</span>
                   <span className="cookies-value">{c.value}</span>
-                  {c.path !== '/' && <span className="cookies-value">{c.path}</span>}
-                  <span className="cookies-value">{expiryHint(c.expires)}</span>
+                  {c.path !== '/' && <span className="cookies-value cookies-path">{c.path}</span>}
+                  <span className="cookies-value cookies-hint">{expiryHint(c.expires)}</span>
                 </div>
               ))}
             </div>
