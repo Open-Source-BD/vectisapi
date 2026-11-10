@@ -19,6 +19,6 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "*.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "e2e/**/*.ts", "*.ts"],
   "exclude": ["node_modules", "src-tauri", "crates"]
 }

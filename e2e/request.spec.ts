@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test';
 
+// Requests go to src/test/mockTauri.ts (an echo of the request), never to the network.
+
 test('sends a GET request and shows response', async ({ page }) => {
   await page.goto('/');
 
@@ -32,4 +34,7 @@ test('sends a POST request with raw JSON body', async ({ page }) => {
   await page.locator('.send-btn', { hasText: 'Send' }).click();
 
   await expect(page.locator('.status-badge')).toContainText('200', { timeout: 20000 });
+  // The mock echoes the parsed body back, so this proves the body reached the native layer.
+  await expect(page.locator('.response-pane')).toContainText('"POST"');
+  await expect(page.locator('.response-pane')).toContainText('world');
 });

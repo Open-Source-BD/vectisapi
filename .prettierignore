@@ -5,3 +5,6 @@ src-tauri/gen/
 package-lock.json
 docs/
 .superpowers/
+dist-e2e/
+playwright-report/
+test-results/
