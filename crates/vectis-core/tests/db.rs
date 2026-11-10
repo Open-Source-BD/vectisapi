@@ -191,6 +191,7 @@ async fn history_search_fts_10k_under_50ms() {
     let t = Instant::now();
     let r = db.search_history("users".into(), 1000).await.unwrap();
     let elapsed = t.elapsed();
+    println!("10k history search (1000 hits): {elapsed:?}");
     assert_eq!(r.len(), 1000);
     assert!(elapsed.as_millis() < 50, "search took {elapsed:?}");
 }
