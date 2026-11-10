@@ -20,6 +20,25 @@ fn setup_with(settings: Settings) -> (Arc<HttpEngine>, ClientPool, Arc<ResponseS
     (engine, pool, store)
 }
 
+fn setup_with_jar() -> (Arc<HttpEngine>, Arc<CookieJar>) {
+    let settings = Settings::default();
+    let pool = ClientPool::new(&settings);
+    let store = Arc::new(ResponseStore::new(settings.response_store_cap_bytes));
+    let jar = Arc::new(CookieJar::new());
+    let engine = Arc::new(HttpEngine::new(pool, store, jar.clone()));
+    (engine, jar)
+}
+
+/// Header values named `name` from an `/echo-headers` response body.
+fn echoed(body: &[u8], name: &str) -> Vec<String> {
+    let pairs: Vec<(String, String)> = serde_json::from_slice(body).unwrap();
+    pairs
+        .into_iter()
+        .filter(|(k, _)| k == name)
+        .map(|(_, v)| v)
+        .collect()
+}
+
 fn setup() -> (Arc<HttpEngine>, ClientPool, Arc<ResponseStore>) {
     setup_with(Settings::default())
 }
@@ -230,6 +249,99 @@ async fn redirects_followed_and_capped() {
         .unwrap();
     assert_eq!(meta.status, 303);
     assert_eq!(meta.final_url, format!("{base}/redirect/3"));
+}
+
+#[tokio::test]
+async fn jar_attached_unless_explicit_cookie_header() {
+    let base = server::spawn().await;
+    let (engine, jar) = setup_with_jar();
+    engine
+        .send(spec("GET", format!("{base}/multi-set-cookie")))
+        .await
+        .unwrap();
+    assert_eq!(jar.list().len(), 3);
+
+    let (_, body) = engine
+        .send(spec("GET", format!("{base}/echo-headers")))
+        .await
+        .unwrap();
+    assert_eq!(echoed(&body, "cookie"), vec!["a=1; b=2; c=3"]);
+
+    let mut s = spec("GET", format!("{base}/echo-headers"));
+    s.headers = vec![h("cookie", "mine=1")];
+    let (_, body) = engine.send(s).await.unwrap();
+    assert_eq!(echoed(&body, "cookie"), vec!["mine=1"]);
+}
+
+#[tokio::test]
+async fn set_cookie_captured_after_redirect_hops() {
+    let base = server::spawn().await;
+    let (engine, jar) = setup_with_jar();
+    let (meta, body) = engine
+        .send(spec("GET", format!("{base}/set-cookie-redirect")))
+        .await
+        .unwrap();
+    assert_eq!(meta.status, 200);
+    assert_eq!(meta.final_url, format!("{base}/echo-headers"));
+    assert_eq!(echoed(&body, "cookie"), vec!["a=1"]);
+    let names: Vec<String> = jar.list().into_iter().map(|c| c.name).collect();
+    assert_eq!(names, vec!["a"]);
+}
+
+#[tokio::test]
+async fn authorization_dropped_on_cross_host_redirect() {
+    let base = server::spawn().await; // http://127.0.0.1:port
+    let other_host = base.replace("127.0.0.1", "localhost");
+    let (engine, _) = setup_with_jar();
+
+    // Same host: kept.
+    let mut s = spec("GET", format!("{base}/redirect-to?to={base}/echo-headers"));
+    s.headers = vec![h("Authorization", "Bearer secret")];
+    let (_, body) = engine.send(s).await.unwrap();
+    assert_eq!(echoed(&body, "authorization"), vec!["Bearer secret"]);
+
+    // Different host: dropped, other headers kept.
+    let mut s = spec(
+        "GET",
+        format!("{base}/redirect-to?to={other_host}/echo-headers"),
+    );
+    s.headers = vec![h("Authorization", "Bearer secret"), h("X-Keep", "1")];
+    let (meta, body) = engine.send(s).await.unwrap();
+    assert_eq!(meta.final_url, format!("{other_host}/echo-headers"));
+    assert!(echoed(&body, "authorization").is_empty());
+    assert_eq!(echoed(&body, "x-keep"), vec!["1"]);
+}
+
+#[tokio::test]
+async fn redirect_method_and_body_rules() {
+    let base = server::spawn().await;
+    let (engine, _) = setup_with_jar();
+
+    // 307 keeps method and body.
+    let mut s = spec(
+        "POST",
+        format!("{base}/redirect-to?status=307&to=/echo-body"),
+    );
+    s.headers = vec![h("Content-Type", "text/plain")];
+    s.body = BodySpec::Text("payload".into());
+    let (meta, body) = engine.send(s).await.unwrap();
+    assert_eq!(meta.status, 200);
+    assert_eq!(&body[..], b"payload");
+    assert!(meta
+        .headers
+        .contains(&h("x-echo-content-type", "text/plain")));
+
+    // 302 switches to GET and drops the body and its headers.
+    let mut s = spec(
+        "POST",
+        format!("{base}/redirect-to?status=302&to=/echo-headers"),
+    );
+    s.headers = vec![h("Content-Type", "text/plain")];
+    s.body = BodySpec::Text("payload".into());
+    let (meta, body) = engine.send(s).await.unwrap();
+    assert_eq!(meta.status, 200);
+    assert!(echoed(&body, "content-type").is_empty());
+    assert!(echoed(&body, "content-length").is_empty());
 }
 
 #[tokio::test]

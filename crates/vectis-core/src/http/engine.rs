@@ -9,7 +9,10 @@ use base64::Engine as _;
 use bytes::{Bytes, BytesMut};
 use dashmap::DashMap;
 use futures_util::StreamExt;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue, CONTENT_TYPE, COOKIE, SET_COOKIE};
+use reqwest::header::{
+    HeaderMap, HeaderName, HeaderValue, AUTHORIZATION, CONTENT_ENCODING, CONTENT_LENGTH,
+    CONTENT_TYPE, COOKIE, LOCATION, SET_COOKIE, TRANSFER_ENCODING,
+};
 use reqwest::multipart::{Form, Part};
 use reqwest::{Method, RequestBuilder, Version};
 use tokio_util::sync::CancellationToken;
@@ -74,31 +77,90 @@ impl HttpEngine {
 
     async fn execute(&self, spec: &HttpRequestSpec) -> Result<(ResponseMeta, Bytes), CoreError> {
         self.pool.check()?;
-        let url = parse_url(&spec.url)?;
-        let method = Method::from_bytes(spec.method.trim().to_ascii_uppercase().as_bytes())
+        let mut url = parse_url(&spec.url)?;
+        let mut method = Method::from_bytes(spec.method.trim().to_ascii_uppercase().as_bytes())
             .map_err(|_| {
                 CoreError::new(ErrorKind::Other, format!("invalid method: {}", spec.method))
             })?;
         let is_multipart = matches!(spec.body, BodySpec::Multipart(_));
         let mut headers = build_headers(&spec.headers, is_multipart)?;
-        if !headers.contains_key(COOKIE) {
-            if let Some(cookie) = self.jar.header_for(&url) {
-                if let Ok(value) = HeaderValue::from_str(&cookie) {
-                    headers.append(COOKIE, value);
+        // An explicit Cookie header is sent on every hop and the jar stays out of it.
+        let use_jar = !headers.contains_key(COOKIE);
+        let no_body = BodySpec::None;
+        let mut body = &spec.body;
+
+        let client = self.pool.client();
+        let max_redirects = self.pool.max_redirects();
+        let timeout_ms = spec.timeout_ms.unwrap_or_else(|| self.pool.timeout_ms());
+        let started = Instant::now();
+        // One deadline for the whole chain, final body included.
+        let deadline = (timeout_ms > 0).then(|| started + Duration::from_millis(timeout_ms));
+        let mut redirects = 0;
+
+        let response = loop {
+            let mut hop_headers = headers.clone();
+            if use_jar {
+                if let Some(cookie) = self.jar.header_for(&url) {
+                    if let Ok(value) = HeaderValue::from_str(&cookie) {
+                        hop_headers.append(COOKIE, value);
+                    }
                 }
             }
-        }
+            let has_content_type = hop_headers.contains_key(CONTENT_TYPE);
+            let mut request = client
+                .request(method.clone(), url.clone())
+                .headers(hop_headers);
+            if let Some(deadline) = deadline {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    return Err(CoreError::new(ErrorKind::Timeout, "request timed out"));
+                }
+                request = request.timeout(remaining);
+            }
+            request = attach_body(request, body, has_content_type).await?;
+            let response = request.send().await?;
 
-        let has_content_type = headers.contains_key(CONTENT_TYPE);
-        let mut request = self.pool.client().request(method, url).headers(headers);
-        let timeout_ms = spec.timeout_ms.unwrap_or_else(|| self.pool.timeout_ms());
-        if timeout_ms > 0 {
-            request = request.timeout(Duration::from_millis(timeout_ms));
-        }
-        request = attach_body(request, &spec.body, has_content_type).await?;
+            let set_cookies: Vec<String> = response
+                .headers()
+                .get_all(SET_COOKIE)
+                .iter()
+                .map(|v| String::from_utf8_lossy(v.as_bytes()).into_owned())
+                .collect();
+            if !set_cookies.is_empty() {
+                self.jar.store_response(&url, &set_cookies);
+            }
 
-        let started = Instant::now();
-        let response = request.send().await?;
+            let Some(max) = max_redirects else {
+                break response;
+            };
+            let Some(next) = redirect_target(&response, &url) else {
+                break response;
+            };
+            if redirects >= max {
+                return Err(CoreError::new(
+                    ErrorKind::Other,
+                    format!("too many redirects (max {max})"),
+                ));
+            }
+            redirects += 1;
+            if !same_host(&url, &next) {
+                // Never leak credentials to another host (curl and browsers do the same).
+                headers.remove(AUTHORIZATION);
+            }
+            if matches!(response.status().as_u16(), 301..=303) && method != Method::HEAD {
+                method = Method::GET;
+                body = &no_body;
+                for name in [
+                    CONTENT_TYPE,
+                    CONTENT_LENGTH,
+                    CONTENT_ENCODING,
+                    TRANSFER_ENCODING,
+                ] {
+                    headers.remove(name);
+                }
+            }
+            url = next;
+        };
         let ttfb_ms = elapsed_ms(started);
 
         let status = response.status();
@@ -113,17 +175,8 @@ impl HttpEngine {
                 )
             })
             .collect();
-        let set_cookies: Vec<String> = response
-            .headers()
-            .get_all(SET_COOKIE)
-            .iter()
-            .map(|v| String::from_utf8_lossy(v.as_bytes()).into_owned())
-            .collect();
         let http_version = version_label(response.version());
         let remote_addr = response.remote_addr().map(|a| a.to_string());
-        if !set_cookies.is_empty() {
-            self.jar.store_response(&final_url, &set_cookies);
-        }
 
         let response_id = uuid::Uuid::new_v4().to_string();
         let mut writer = self.store.begin(&response_id);
@@ -170,6 +223,22 @@ impl Drop for Registration<'_> {
                 *generation == self.generation
             });
     }
+}
+
+/// The next URL when `response` is a followable redirect (301/302/303/307/308 with a usable
+/// `Location`, resolved against `current`); otherwise the response is final.
+fn redirect_target(response: &reqwest::Response, current: &Url) -> Option<Url> {
+    if !matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308) {
+        return None;
+    }
+    let location = response.headers().get(LOCATION)?.to_str().ok()?;
+    let next = current.join(location.trim()).ok()?;
+    matches!(next.scheme(), "http" | "https").then_some(next)
+}
+
+/// Same host name; a scheme or port change alone (e.g. an http → https upgrade) keeps credentials.
+fn same_host(a: &Url, b: &Url) -> bool {
+    a.host_str() == b.host_str()
 }
 
 fn parse_url(raw: &str) -> Result<Url, CoreError> {

@@ -5,7 +5,7 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use axum::body::{Body, Bytes};
-use axum::extract::{DefaultBodyLimit, Multipart, Path};
+use axum::extract::{DefaultBodyLimit, Multipart, Path, Query};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{any, get, post};
@@ -37,6 +37,8 @@ fn router() -> Router {
         .route("/echo-body", post(echo_body))
         .route("/multipart", post(multipart))
         .route("/redirect/{n}", get(redirect))
+        .route("/set-cookie-redirect", get(set_cookie_redirect))
+        .route("/redirect-to", any(redirect_to))
         .route("/compressed/{enc}", get(compressed))
         .route("/sleep/{ms}", get(sleep))
         .route("/slow-stream", get(slow_stream))
@@ -129,6 +131,24 @@ async fn redirect(Path(n): Path<u32>) -> Response {
     } else {
         Redirect::to(&format!("/redirect/{}", n - 1)).into_response()
     }
+}
+
+/// Sets `a=1` and redirects (303) to `/echo-headers`.
+async fn set_cookie_redirect() -> Response {
+    let mut res = Redirect::to("/echo-headers").into_response();
+    res.headers_mut()
+        .append(header::SET_COOKIE, "a=1; Path=/".parse().unwrap());
+    res
+}
+
+/// Redirects to `?to=<url>` with status `?status=<code>` (default 302).
+async fn redirect_to(Query(q): Query<std::collections::HashMap<String, String>>) -> Response {
+    let status = q
+        .get("status")
+        .and_then(|s| s.parse::<u16>().ok())
+        .and_then(|s| StatusCode::from_u16(s).ok())
+        .unwrap_or(StatusCode::FOUND);
+    (status, [(header::LOCATION, q["to"].clone())]).into_response()
 }
 
 async fn compressed(Path(enc): Path<String>) -> Response {

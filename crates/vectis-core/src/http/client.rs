@@ -14,6 +14,8 @@ struct Pooled {
     client: reqwest::Client,
     /// Settings timeout; applied per request so a request can override it.
     timeout_ms: u64,
+    /// Redirect cap when following is on; `None` when redirects are returned as-is.
+    max_redirects: Option<usize>,
     /// Set when the settings could not be applied (e.g. a bad proxy URL); sends fail with it.
     build_error: Option<String>,
 }
@@ -45,6 +47,11 @@ impl ClientPool {
         self.inner.read().timeout_ms
     }
 
+    /// Redirect cap when the engine should follow redirects; `None` when it should not.
+    pub(crate) fn max_redirects(&self) -> Option<usize> {
+        self.inner.read().max_redirects
+    }
+
     pub(crate) fn check(&self) -> Result<(), CoreError> {
         match &self.inner.read().build_error {
             Some(msg) => Err(CoreError::new(ErrorKind::Other, msg.clone())),
@@ -61,17 +68,14 @@ fn build(settings: &Settings) -> Pooled {
     Pooled {
         client,
         timeout_ms: settings.timeout_ms,
+        max_redirects: settings.follow_redirects.then_some(settings.max_redirects),
         build_error,
     }
 }
 
 fn make_client(settings: &Settings) -> Result<reqwest::Client, String> {
-    let redirect = if settings.follow_redirects {
-        reqwest::redirect::Policy::limited(settings.max_redirects)
-    } else {
-        reqwest::redirect::Policy::none()
-    };
-    // Cookies are handled by our own jar, so reqwest's cookie store stays off (feature not enabled).
+    // Redirects are followed by the engine (so the cookie jar sees every hop), and cookies are
+    // handled by our own jar, so reqwest's cookie store stays off (feature not enabled).
     let mut b = reqwest::Client::builder()
         .user_agent(
             settings
@@ -79,7 +83,7 @@ fn make_client(settings: &Settings) -> Result<reqwest::Client, String> {
                 .clone()
                 .unwrap_or_else(|| DEFAULT_USER_AGENT.to_string()),
         )
-        .redirect(redirect)
+        .redirect(reqwest::redirect::Policy::none())
         .tls_danger_accept_invalid_certs(!settings.verify_tls)
         // System/env proxies are off by default; only the configured proxy is used.
         .no_proxy();
