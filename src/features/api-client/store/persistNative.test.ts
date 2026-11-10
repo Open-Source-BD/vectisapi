@@ -10,7 +10,7 @@ vi.mock('../lib/native/invoke', async (orig) => ({
 }));
 
 import { flushDone, loadWorkspace, onFlush, saveEntities, type WorkspaceSnapshot } from '../lib/native/invoke';
-import { diffToOps, flushNow, startPersistence } from './persistNative';
+import { diffToOps, flushNow, pausePersistence, resumePersistence, startPersistence } from './persistNative';
 import { createDefaultTab, useApiStore } from './useApiStore';
 import type { StoreState } from './slices/types';
 
@@ -117,7 +117,7 @@ describe('startPersistence', () => {
       flushHandler = h;
       return unlisten;
     });
-    useApiStore.setState({ hydrated: false, collections: [], environments: [] });
+    useApiStore.setState({ hydrated: false, collections: [], environments: [], persistNotice: null });
   });
 
   afterEach(async () => {
@@ -219,9 +219,111 @@ describe('startPersistence', () => {
     const stop = await startPersistence();
     useApiStore.setState({ environments: [env('e1')] });
     flushHandler?.();
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(1000); // the one retry
+    expect(mockSave).toHaveBeenCalledTimes(2);
     expect(mockFlushDone).toHaveBeenCalledTimes(1);
     warn.mockRestore();
+    stop();
+  });
+
+  /** A fake database: a call's ops commit when its promise resolves, after `delays[n]` ms. */
+  function fakeDb(delays: number[]) {
+    const commits: string[] = [];
+    let call = 0;
+    mockSave.mockImplementation((ops) => {
+      const delay = delays[call++] ?? 0;
+      return new Promise<void>((resolve) =>
+        setTimeout(() => {
+          for (const op of ops) if (op.op === 'upsertCollection') commits.push(JSON.parse(op.json).name);
+          resolve();
+        }, delay),
+      );
+    });
+    return commits;
+  }
+
+  it('serializes writes: a slow older write still commits before a newer one', async () => {
+    const commits = fakeDb([500, 0]);
+    const stop = await startPersistence();
+    const c = col('a');
+    useApiStore.setState({ collections: [{ ...c, name: 'old' } as never] });
+    await vi.advanceTimersByTimeAsync(300); // first write starts, takes 500 ms
+    useApiStore.setState({ collections: [{ ...c, name: 'new' } as never] });
+    await vi.advanceTimersByTimeAsync(300); // second write is due but must wait
+    expect(mockSave).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(mockSave).toHaveBeenCalledTimes(2);
+    expect(commits).toEqual(['old', 'new']);
+    stop();
+  });
+
+  it('flushNow waits behind a write already in flight', async () => {
+    const commits = fakeDb([500, 0]);
+    const stop = await startPersistence();
+    const c = col('a');
+    useApiStore.setState({ collections: [{ ...c, name: 'old' } as never] });
+    await vi.advanceTimersByTimeAsync(300);
+    useApiStore.setState({ collections: [{ ...c, name: 'new' } as never] });
+    let flushed = false;
+    void flushNow().then(() => (flushed = true));
+    await vi.advanceTimersByTimeAsync(100);
+    expect(flushed).toBe(false);
+    expect(mockSave).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(400); // t=800: the slow write commits, then the flush write
+    await vi.advanceTimersByTimeAsync(1);
+    expect(flushed).toBe(true);
+    expect(commits).toEqual(['old', 'new']);
+    stop();
+  });
+
+  it('retries a failed write once after 1 s; success shows no notice', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockSave.mockRejectedValueOnce(new Error('busy'));
+    const stop = await startPersistence();
+    useApiStore.setState({ environments: [env('e1')] });
+    await vi.advanceTimersByTimeAsync(300);
+    expect(mockSave).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(mockSave).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(mockSave).toHaveBeenCalledTimes(2);
+    expect(mockSave.mock.calls[1][0]).toEqual(mockSave.mock.calls[0][0]);
+    expect(base().persistNotice).toBeNull();
+    warn.mockRestore();
+    stop();
+  });
+
+  it('a write that fails twice shows a notice; the next successful write clears it', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockSave.mockRejectedValueOnce(new Error('disk full')).mockRejectedValueOnce(new Error('disk full'));
+    const stop = await startPersistence();
+    useApiStore.setState({ environments: [env('e1')] });
+    await vi.advanceTimersByTimeAsync(1300);
+    expect(mockSave).toHaveBeenCalledTimes(2);
+    expect(base().persistNotice).toBe('Changes could not be saved — disk full');
+    useApiStore.setState({ environments: [env('e2')] });
+    await vi.advanceTimersByTimeAsync(300);
+    expect(mockSave).toHaveBeenCalledTimes(4); // upsert e2, delete e1
+    expect(base().persistNotice).toBeNull();
+    warn.mockRestore();
+    stop();
+  });
+
+  it('pausePersistence drops pending edits and ignores changes until resumed', async () => {
+    const stop = await startPersistence();
+    useApiStore.setState({ environments: [env('pending')] });
+    pausePersistence();
+    useApiStore.setState({ environments: [env('ignored')] });
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(mockSave).not.toHaveBeenCalled();
+    resumePersistence();
+    useApiStore.setState({ environments: [env('after')] });
+    await vi.advanceTimersByTimeAsync(300);
+    // Only the change made after resuming is written (diffed against the state at that point).
+    expect(mockSave.mock.calls.map((c) => c[0])).toEqual([
+      [{ op: 'upsertEnvironment', id: 'after', sort: 0, json: JSON.stringify(env('after')) }],
+      [{ op: 'deleteEnvironment', id: 'ignored' }],
+    ]);
     stop();
   });
 

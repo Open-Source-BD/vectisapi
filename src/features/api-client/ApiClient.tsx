@@ -14,6 +14,7 @@ import { MoveToModal } from './components/modals/MoveToModal';
 import { ResponseModal } from './components/modals/ResponseModal';
 import { RunnerModal } from './components/modals/RunnerModal';
 import { CommandPalette } from './components/CommandPalette';
+import { PersistNotice } from './components/PersistNotice';
 import { CookiesModal } from './components/modals/CookiesModal';
 import { SaveModal } from './components/modals/SaveModal';
 import { SettingsModal } from './components/modals/SettingsModal';
@@ -124,6 +125,7 @@ export function ApiClient() {
       <CommandPalette />
       <CookiesModal />
       <SettingsModal />
+      <PersistNotice />
     </div>
   );
 }

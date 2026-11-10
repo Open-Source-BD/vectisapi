@@ -15,6 +15,8 @@ import { useApiStore } from './useApiStore';
 const DEBOUNCE_MS = 300;
 /** Longest an entity's first unsaved change may wait, however steadily it keeps changing. */
 const MAX_WAIT_MS = 1000;
+/** Delay before the single retry of a failed write. */
+const RETRY_DELAY_MS = 1000;
 
 /** Stable identity of the entity an op writes; later ops for the same key replace earlier ones. */
 function opKey(op: EntityOp): string {
@@ -92,14 +94,41 @@ export function diffToOps(prev: StoreState, next: StoreState): EntityOp[] {
 const pending = new Map<string, EntityOp>();
 const firstPendingAt = new Map<string, number>();
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
-const inflight = new Set<Promise<void>>();
+/** Every write runs after the previous one settles, so an older write never lands last. */
+let writes: Promise<void> = Promise.resolve();
+/** While paused (a backup import replacing the database), store changes are not persisted. */
+let paused = false;
+
+const errorMessage = (e: unknown): string =>
+  e instanceof Error ? e.message : typeof e === 'object' && e && 'message' in e ? String(e.message) : String(e);
+
+/** Writes `ops`, retrying once after `RETRY_DELAY_MS`; a second failure shows a notice. */
+async function write(ops: EntityOp[]): Promise<void> {
+  try {
+    await saveEntities(ops);
+  } catch (first) {
+    console.warn('save_entities failed, retrying', first);
+    await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+    try {
+      await saveEntities(ops);
+    } catch (e) {
+      console.warn('save_entities failed', e);
+      useApiStore.getState().setPersistNotice(`Changes could not be saved — ${errorMessage(e)}`);
+      return;
+    }
+  }
+  if (useApiStore.getState().persistNotice) useApiStore.getState().setPersistNotice(null);
+}
 
 function send(ops: EntityOp[]): void {
   if (ops.length === 0) return;
-  const p = saveEntities(ops)
-    .catch((e: unknown) => console.warn('save_entities failed', e))
-    .finally(() => inflight.delete(p));
-  inflight.add(p);
+  writes = writes.then(() => write(ops));
+}
+
+function cancelPending(): void {
+  for (const timer of timers.values()) clearTimeout(timer);
+  timers.clear();
+  firstPendingAt.clear();
 }
 
 function schedule(op: EntityOp): void {
@@ -121,15 +150,27 @@ function schedule(op: EntityOp): void {
   );
 }
 
-/** Writes every pending op now (one call) and waits for all writes in flight. */
+/** Writes every pending op now (one call, after the writes already queued) and waits for all. */
 export async function flushNow(): Promise<void> {
-  for (const timer of timers.values()) clearTimeout(timer);
-  timers.clear();
-  firstPendingAt.clear();
+  cancelPending();
   const ops = [...pending.values()];
   pending.clear();
   send(ops);
-  await Promise.all([...inflight]);
+  await writes;
+}
+
+/**
+ * Stops persisting: pending (unwritten) edits are dropped and store changes are ignored until
+ * `resumePersistence`. Used around a backup import, which replaces the database underneath.
+ */
+export function pausePersistence(): void {
+  paused = true;
+  cancelPending();
+  pending.clear();
+}
+
+export function resumePersistence(): void {
+  paused = false;
 }
 
 /** Replaces the store's persisted state (workspace + settings) with `snap`. */
@@ -149,7 +190,8 @@ function hydrateFrom(snap: WorkspaceSnapshot): void {
 
 /**
  * Re-reads everything from SQLite into the store (after a backup import replaced the database).
- * Call `flushNow` before the import so debounced edits can't overwrite the imported data.
+ * Call `flushNow` and `pausePersistence` before the import so debounced edits can't overwrite
+ * the imported data.
  */
 export async function reloadWorkspace(): Promise<void> {
   hydrateFrom(await loadWorkspace());
@@ -161,6 +203,7 @@ export async function reloadWorkspace(): Promise<void> {
  * Resolves once hydrated; the returned function stops persisting.
  */
 export async function startPersistence(): Promise<() => void> {
+  paused = false;
   let unlisten: (() => void) | undefined;
   let stopped = false;
   onFlush(() => {
@@ -183,6 +226,7 @@ export async function startPersistence(): Promise<() => void> {
   }
 
   const unsub = useApiStore.subscribe((state, prev) => {
+    if (paused) return;
     for (const op of diffToOps(prev, state)) schedule(op);
   });
   return () => {

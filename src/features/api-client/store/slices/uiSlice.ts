@@ -25,6 +25,8 @@ export interface UiSlice {
   copied: boolean;
   /** Native app settings, loaded once at startup (`null` until loaded). */
   settings: Settings | null;
+  /** Non-blocking persistence problem shown in a banner (`null` = none). */
+  persistNotice: string | null;
 
   // UI setters
   toggleExpanded: (id: string) => void;
@@ -45,6 +47,7 @@ export interface UiSlice {
   setCopied: (v: boolean) => void;
   toggleTheme: () => void;
   setTheme: (t: Theme) => void;
+  setPersistNotice: (v: string | null) => void;
   loadSettings: () => Promise<void>;
   /** Saves via `set_settings` (Rust applies them), then updates `settings`. Rejects if saving fails. */
   saveSettings: (settings: Settings) => Promise<void>;
@@ -68,6 +71,7 @@ export const createUiSlice: StateCreator<StoreState, [], [], UiSlice> = (set) =>
   codeSnippet: '',
   copied: false,
   settings: null,
+  persistNotice: null,
 
   toggleExpanded: (id) => set((s) => ({ expanded: { ...s.expanded, [id]: !s.expanded[id] } })),
   setCollectionSearch: (collectionSearch) => set({ collectionSearch }),
@@ -87,6 +91,7 @@ export const createUiSlice: StateCreator<StoreState, [], [], UiSlice> = (set) =>
   setCopied: (copied) => set({ copied }),
   toggleTheme: () => set((s) => ({ theme: s.theme === 'light' ? 'dark' : 'light' })),
   setTheme: (theme) => set({ theme }),
+  setPersistNotice: (persistNotice) => set({ persistNotice }),
   loadSettings: async () => {
     try {
       set({ settings: await getSettings() });
