@@ -1,4 +1,4 @@
-import { flushNow, reloadWorkspace } from '../../store/persistNative';
+import { flushNow, pausePersistence, reloadWorkspace, resumePersistence } from '../../store/persistNative';
 import { useApiStore } from '../../store/useApiStore';
 import type { Collection, EnvVar, Environment } from '../../types';
 import { deserializeWorkspace, type FileEntry, type WorkspaceData } from '../workspaceFile';
@@ -15,16 +15,43 @@ export async function exportAll(): Promise<string | null> {
   return exportBackup();
 }
 
+/** Shown when the database was replaced but the store could not be reloaded from it. */
+export const RESTART_AFTER_IMPORT = 'Import finished — restart VectisAPI to load it';
+
 /**
  * Replaces the whole workspace (and settings) with a user-picked backup, then reloads the store
- * from the database; the path, or null if cancelled. Pending edits are written first so a late
- * debounced write can't overwrite the imported data.
+ * from the database; the path, or null if cancelled. Pending edits are written first, and
+ * persistence is paused from just before the import until the reload finishes so no store change
+ * can overwrite the imported data. If the reload fails, persistence stays paused (the store no
+ * longer matches the database) and this rejects with `RESTART_AFTER_IMPORT`.
  */
 export async function importAll(): Promise<string | null> {
   await flushNow();
-  const path = await importBackup();
-  if (path) await reloadWorkspace();
+  pausePersistence();
+  let path: string | null;
+  try {
+    path = await importBackup();
+  } catch (e) {
+    resumePersistence(); // the import rolled back; the database still matches the store
+    throw e;
+  }
+  if (!path) {
+    resumePersistence();
+    return null;
+  }
+  try {
+    await reloadWorkspace();
+  } catch (e) {
+    console.warn('reload after import failed', e);
+    throw new Error(RESTART_AFTER_IMPORT);
+  }
+  resumePersistence();
   return path;
+}
+
+/** Deep copy of `value` without form-data `filePath`s (they point into another filesystem). */
+export function withoutFilePaths<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value), (key, v: unknown) => (key === 'filePath' ? undefined : v)) as T;
 }
 
 /**
@@ -73,7 +100,8 @@ export async function importNextPostman(
 ): Promise<{ collections: number; environments: number } | null> {
   const files = await pickNextPostmanWorkspace(source);
   if (!files) return null;
-  const data = deserializeWorkspace(toWorkspaceEntries(files));
+  // Keep `fileName` so the user sees which file to pick again.
+  const data = withoutFilePaths(deserializeWorkspace(toWorkspaceEntries(files)));
   if (!data.collections.length && !data.environments.length && !data.globals.length) {
     throw new Error('No next-postman workspace found (expected collections/ or environments/).');
   }

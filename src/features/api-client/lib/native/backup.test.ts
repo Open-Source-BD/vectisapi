@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const calls: string[] = [];
+const fail = { import: false, reload: false };
 
 vi.mock('./invoke', async (orig) => ({
   ...(await orig<typeof import('./invoke')>()),
@@ -10,8 +11,10 @@ vi.mock('./invoke', async (orig) => ({
   }),
   importBackup: vi.fn(async () => {
     calls.push('import_backup');
+    if (fail.import) throw { kind: 'other', message: 'bad backup' };
     return '/b.json';
   }),
+  pickNextPostmanWorkspace: vi.fn(),
 }));
 vi.mock('../../store/persistNative', () => ({
   flushNow: vi.fn(async () => {
@@ -19,10 +22,27 @@ vi.mock('../../store/persistNative', () => ({
   }),
   reloadWorkspace: vi.fn(async () => {
     calls.push('reload');
+    if (fail.reload) throw new Error('load failed');
+  }),
+  pausePersistence: vi.fn(() => {
+    calls.push('pause_persistence');
+  }),
+  resumePersistence: vi.fn(() => {
+    calls.push('resume_persistence');
   }),
 }));
 
-import { exportAll, importAll, mergeWorkspace, toWorkspaceEntries } from './backup';
+import {
+  exportAll,
+  importAll,
+  importNextPostman,
+  mergeWorkspace,
+  RESTART_AFTER_IMPORT,
+  toWorkspaceEntries,
+} from './backup';
+import { importBackup, pickNextPostmanWorkspace } from './invoke';
+import { serializeWorkspace } from '../workspaceFile';
+import { createDefaultTab, useApiStore } from '../../store/useApiStore';
 import type { Collection } from '../../types';
 
 const col = (id: string, name = id) => ({ id, name, children: [], date: '' }) as Collection;
@@ -30,6 +50,8 @@ const col = (id: string, name = id) => ({ id, name, children: [], date: '' }) as
 describe('backup', () => {
   beforeEach(() => {
     calls.length = 0;
+    fail.import = false;
+    fail.reload = false;
   });
 
   it('flushes pending edits before exporting', async () => {
@@ -37,9 +59,70 @@ describe('backup', () => {
     expect(calls).toEqual(['flush', 'export_backup']);
   });
 
-  it('flushes before importing, then reloads the store from the database', async () => {
+  it('flushes, pauses persistence across the import and reload, then resumes', async () => {
     expect(await importAll()).toBe('/b.json');
-    expect(calls).toEqual(['flush', 'import_backup', 'reload']);
+    expect(calls).toEqual(['flush', 'pause_persistence', 'import_backup', 'reload', 'resume_persistence']);
+  });
+
+  it('a cancelled or failed import resumes persistence (the database is unchanged)', async () => {
+    vi.mocked(importBackup).mockResolvedValueOnce(null);
+    expect(await importAll()).toBeNull();
+    expect(calls).toEqual(['flush', 'pause_persistence', 'resume_persistence']);
+
+    calls.length = 0;
+    fail.import = true;
+    await expect(importAll()).rejects.toEqual({ kind: 'other', message: 'bad backup' });
+    expect(calls).toEqual(['flush', 'pause_persistence', 'import_backup', 'resume_persistence']);
+  });
+
+  it('a failed reload keeps persistence paused and asks for a restart', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    fail.reload = true;
+    await expect(importAll()).rejects.toThrow(RESTART_AFTER_IMPORT);
+    expect(RESTART_AFTER_IMPORT).toBe('Import finished — restart VectisAPI to load it');
+    expect(calls).toEqual(['flush', 'pause_persistence', 'import_backup', 'reload']);
+    warn.mockRestore();
+  });
+});
+
+describe('importNextPostman', () => {
+  it('drops form-data file paths but keeps file names', async () => {
+    const request = {
+      ...createDefaultTab(),
+      method: 'POST' as const,
+      url: 'https://x.test/upload',
+    };
+    request.body = {
+      ...request.body,
+      type: 'form-data' as never,
+      formdata: [
+        { id: 'f', key: 'doc', value: '', type: 'file', filePath: '/Users/someone/doc.pdf', fileName: 'doc.pdf' },
+        { id: 't', key: 'note', value: 'hi' },
+      ],
+    };
+    const collection = {
+      id: 'np1',
+      name: 'NP',
+      date: '',
+      children: [{ id: 'r1', type: 'request', name: 'Upload', request }],
+    } as Collection;
+    const files = serializeWorkspace({ collections: [collection], environments: [], globals: [] }).map((e) => ({
+      path: `ws/${e.path}`,
+      text: e.content,
+    }));
+    expect(files.some((f) => f.text.includes('/Users/someone/doc.pdf'))).toBe(true);
+    vi.mocked(pickNextPostmanWorkspace).mockResolvedValue(files);
+    useApiStore.setState({ collections: [], environments: [], globals: [] });
+
+    expect(await importNextPostman('zip')).toEqual({ collections: 1, environments: 0 });
+    const imported = useApiStore.getState().collections[0];
+    expect(JSON.stringify(imported)).not.toContain('filePath');
+    const node = imported.children[0];
+    if (node.type !== 'request') throw new Error('expected a request');
+    expect(node.request.body.formdata).toEqual([
+      { id: 'f', key: 'doc', value: '', type: 'file', fileName: 'doc.pdf' },
+      { id: 't', key: 'note', value: 'hi' },
+    ]);
   });
 });
 

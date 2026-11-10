@@ -374,6 +374,18 @@ fn str_field<'a>(v: &'a Value, key: &str) -> &'a str {
     v.get(key).and_then(Value::as_str).unwrap_or("")
 }
 
+/// Removes every `filePath` key (form-data file items) anywhere inside `value`.
+fn strip_file_paths(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            map.remove("filePath");
+            map.values_mut().for_each(strip_file_paths);
+        }
+        Value::Array(items) => items.iter_mut().for_each(strip_file_paths),
+        _ => {}
+    }
+}
+
 pub fn import_backup(conn: &mut Connection, text: &str) -> Result<(), CoreError> {
     let raw: Value = serde_json::from_str(text)?;
     let version = raw.get("version").and_then(Value::as_u64);
@@ -383,7 +395,17 @@ pub fn import_backup(conn: &mut Connection, text: &str) -> Result<(), CoreError>
             version.map_or("(missing)".to_string(), |v| v.to_string())
         )));
     }
-    let b: Backup = serde_json::from_value(raw)?;
+    let mut b: Backup = serde_json::from_value(raw)?;
+    // Form-data file paths point into another machine's (or an old) filesystem; drop them and
+    // keep `fileName` so the user sees which file to pick again.
+    for item in b
+        .collections
+        .iter_mut()
+        .chain(b.tabs.iter_mut())
+        .chain(b.history.iter_mut())
+    {
+        strip_file_paths(item);
+    }
     for (kind, items) in [
         ("collection", &b.collections),
         ("environment", &b.environments),

@@ -308,6 +308,30 @@ async fn import_backup_item_without_id_rejected_and_changes_nothing() {
     assert_eq!(db.load_workspace().await.unwrap(), before);
 }
 
+#[tokio::test]
+async fn import_backup_drops_form_data_file_paths_keeps_names() {
+    let file_item = json!({"id": "f", "key": "doc", "value": "", "type": "file",
+        "filePath": "/Users/someone/doc.pdf", "fileName": "doc.pdf"});
+    let request = json!({"id": "t1", "method": "POST", "url": "u",
+        "body": {"type": "form-data", "formData": [file_item]}});
+    let backup = json!({
+        "version": 1,
+        "collections": [{"id": "c1", "name": "C", "children": [
+            {"id": "f1", "type": "folder", "name": "F", "children": [
+                {"id": "r1", "type": "request", "name": "R", "request": request}
+            ]}
+        ]}],
+        "tabs": [request],
+        "history": [{"id": "h1", "method": "POST", "url": "u", "status": 200, "time": 1,
+            "date": "2026-01-01", "request": request}],
+    });
+    let db = Db::open_in_memory().unwrap();
+    db.import_backup(backup.to_string()).await.unwrap();
+    let exported = db.export_backup().await.unwrap();
+    assert!(!exported.contains("filePath"), "{exported}");
+    assert_eq!(exported.matches("\"fileName\":\"doc.pdf\"").count(), 3);
+}
+
 #[test]
 fn newer_schema_version_refuses_with_clear_error() {
     let dir = tempfile::tempdir().unwrap();
