@@ -18,6 +18,8 @@ export interface RealtimeState {
   messages: RtMessage[];
   /** total messages received this session (the log itself is capped). */
   total: number;
+  /** running byte weight of `messages` (for the 20 MB log cap). */
+  logBytes?: number;
   error?: string;
   /** close code/reason when status is closed/error. */
   closeInfo?: string;

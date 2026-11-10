@@ -3,7 +3,7 @@ import { useApiStore } from '../../store/useApiStore';
 import { filterHistory, groupHistoryByDate } from '../../lib/historyGroup';
 import { searchHistory } from '../../lib/native/invoke';
 import type { HistoryItem } from '../../types';
-import { WindowedList } from './WindowedList';
+import { WindowedList } from '@/components/ui/WindowedList';
 
 const SEARCH_DEBOUNCE_MS = 150;
 const DEFAULT_SEARCH_LIMIT = 1000;
@@ -126,9 +126,7 @@ export function HistoryPanel() {
           keyOf={rowKey}
           renderItem={(row) =>
             row.kind === 'label' ? (
-              <div className="history-group-label">
-                {row.label}
-              </div>
+              <div className="history-group-label">{row.label}</div>
             ) : (
               <div className="history-row" onClick={() => replayHistory(row.item)}>
                 <span className={`h-method collection-method ${row.item.method.toLowerCase()}`}>{row.item.method}</span>

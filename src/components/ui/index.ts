@@ -4,3 +4,4 @@ export { JsonTree } from './JsonTree';
 export { KvEditor } from './KvEditor';
 export { PaneResizer } from './PaneResizer';
 export type { EditorLang } from './editorKeys';
+export { WindowedList } from './WindowedList';

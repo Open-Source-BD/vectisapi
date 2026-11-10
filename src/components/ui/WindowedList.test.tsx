@@ -15,7 +15,10 @@ class FakeResizeObserver {
   unobserve() {}
   disconnect() {}
   fire(targets: Element[]) {
-    this.cb(targets.map((target) => ({ target }) as ResizeObserverEntry), this as never);
+    this.cb(
+      targets.map((target) => ({ target }) as ResizeObserverEntry),
+      this as never,
+    );
   }
 }
 

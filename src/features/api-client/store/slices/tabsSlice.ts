@@ -1,22 +1,47 @@
 import type { StateCreator } from 'zustand';
 import type { StoreState } from './types';
-import type { TabState, Protocol, RealtimeState, RtMessage } from '../../types';
+import type { TabState, Protocol, RealtimeState } from '../../types';
 import { generateId } from '../../lib/id';
 import { isTabDirty } from '../../lib/tabDirty';
-import { closeConnection, openWebSocket, openSse, sendWebSocket, byteLen } from '../../lib/realtimeConnection';
-import { buildRequestSpec } from '../../lib/native/buildRequestSpec';
+import {
+  closeConnection,
+  openWebSocket,
+  openSse,
+  sendWebSocket,
+  byteLen,
+  type RtHandlers,
+} from '../../lib/realtimeConnection';
+import { buildRequestSpec, buildWsRequest } from '../../lib/native/buildRequestSpec';
 import { findNode } from '../../lib/collectionTree';
-import { resolveEnv } from '../../lib/envResolver';
-import { clone, createDefaultTab, type PendingSave, selectActiveVars, RT_LOG_CAP, RT_MSG_MAX } from './helpers';
+import { clone, createDefaultTab, type PendingSave, selectActiveVars, pushRtMessage } from './helpers';
 
-function pushRtMessage(rt: RealtimeState, dir: RtMessage['dir'], text: string, bytes: number): RealtimeState {
-  const truncated = text.length > RT_MSG_MAX ? `${text.slice(0, RT_MSG_MAX)}… [truncated, ${bytes} bytes]` : text;
-  const msg: RtMessage = { id: generateId(), dir, text: truncated, bytes, ts: Date.now() };
-  const messages = [...rt.messages, msg];
+type StoreSet = Parameters<StateCreator<StoreState, [], [], TabsSlice>>[0];
+
+/** Handlers that write a tab's live connection events into `realtime[tabId]`. */
+function rtHandlers(tabId: string, set: StoreSet): RtHandlers {
   return {
-    ...rt,
-    messages: messages.length > RT_LOG_CAP ? messages.slice(messages.length - RT_LOG_CAP) : messages,
-    total: rt.total + 1,
+    onStatus: (status, info) =>
+      set((s) => {
+        const rt = s.realtime[tabId] ?? { status: 'idle', messages: [], total: 0 };
+        return {
+          realtime: {
+            ...s.realtime,
+            [tabId]: { ...rt, status, closeInfo: info, error: status === 'error' ? (info ?? 'error') : rt.error },
+          },
+        };
+      }),
+    onMessage: (dir, text, bytes) =>
+      set((s) => {
+        const rt = s.realtime[tabId];
+        if (!rt) return {};
+        return { realtime: { ...s.realtime, [tabId]: pushRtMessage(rt, dir, text, bytes) } };
+      }),
+    onId: (id) =>
+      set((s) => {
+        const rt = s.realtime[tabId];
+        if (!rt) return {};
+        return { realtime: { ...s.realtime, [tabId]: { ...rt, lastEventId: id } } };
+      }),
   };
 }
 
@@ -64,7 +89,7 @@ export const createTabsSlice: StateCreator<StoreState, [], [], TabsSlice> = (set
 
   closeTab: (id) => {
     const { tabs, activeTabId } = get();
-    closeConnection(id);
+    // The live connection is closed by the tab-id subscription in useApiStore.
     const dropRt = (rt: Record<string, RealtimeState>) => {
       if (!rt[id]) return rt;
       const next = { ...rt };
@@ -136,22 +161,12 @@ export const createTabsSlice: StateCreator<StoreState, [], [], TabsSlice> = (set
     const state = get();
     const tab = state.tabs.find((t) => t.id === tabId);
     if (!tab) return;
-    const url = resolveEnv(tab.url, selectActiveVars(state)).trim();
-
-    const setRt = (next: Partial<RealtimeState>) =>
+    const ws = buildWsRequest(tab, selectActiveVars(state), tabId);
+    if (!ws) {
       set((s) => {
         const rt = s.realtime[tabId] ?? { status: 'idle', messages: [], total: 0 };
-        return { realtime: { ...s.realtime, [tabId]: { ...rt, ...next } } };
-      });
-
-    if (!/^wss?:\/\//i.test(url)) {
-      setRt({ status: 'error', error: 'WebSocket URL must start with ws:// or wss://' });
-      return;
-    }
-    if (typeof location !== 'undefined' && location.protocol === 'https:' && /^ws:\/\//i.test(url)) {
-      setRt({
-        status: 'error',
-        error: 'Cannot open ws:// from an https page (mixed content). Use wss:// or run locally over http.',
+        const error = 'WebSocket URL must start with ws:// or wss://';
+        return { realtime: { ...s.realtime, [tabId]: { ...rt, status: 'error', error } } };
       });
       return;
     }
@@ -159,24 +174,7 @@ export const createTabsSlice: StateCreator<StoreState, [], [], TabsSlice> = (set
     set((s) => ({
       realtime: { ...s.realtime, [tabId]: { status: 'connecting', messages: [], total: 0 } as RealtimeState },
     }));
-    openWebSocket(tabId, url, [], {
-      onStatus: (status, info) =>
-        set((s) => {
-          const rt = s.realtime[tabId] ?? { status: 'idle', messages: [], total: 0 };
-          return {
-            realtime: {
-              ...s.realtime,
-              [tabId]: { ...rt, status, closeInfo: info, error: status === 'error' ? (info ?? 'error') : rt.error },
-            },
-          };
-        }),
-      onMessage: (dir, text, bytes) =>
-        set((s) => {
-          const rt = s.realtime[tabId];
-          if (!rt) return {};
-          return { realtime: { ...s.realtime, [tabId]: pushRtMessage(rt, dir, text, bytes) } };
-        }),
-    });
+    openWebSocket(tabId, ws.url, [], rtHandlers(tabId, set), ws.headers);
   },
 
   wsSend: (tabId, text) => {
@@ -203,22 +201,9 @@ export const createTabsSlice: StateCreator<StoreState, [], [], TabsSlice> = (set
     const state = get();
     const tab = state.tabs.find((t) => t.id === tabId);
     if (!tab) return;
-    // Interim until SSE moves to rt_open_sse (Task 12): same request assembly as
-    // HTTP sends; jar cookies are no longer injected here (the Rust jar owns them).
+    // Same request assembly as HTTP sends (incl. form-data); the Rust engine streams it.
     const spec = buildRequestSpec(tab, selectActiveVars(state), tabId);
     const prevId = state.realtime[tabId]?.lastEventId;
-
-    const proxyHeaders = new Headers();
-    spec.headers.forEach(([k, v]) => proxyHeaders.append(k, v));
-    proxyHeaders.set('X-Proxy-Target-Url', spec.url);
-    proxyHeaders.set('X-Proxy-Method', spec.method);
-    if (prevId) proxyHeaders.set('X-Proxy-Last-Event-Id', prevId);
-    const sseBody =
-      spec.body.type === 'text'
-        ? spec.body.value
-        : spec.body.type === 'urlEncoded'
-          ? new URLSearchParams(spec.body.value)
-          : undefined;
 
     set((s) => ({
       realtime: {
@@ -226,33 +211,6 @@ export const createTabsSlice: StateCreator<StoreState, [], [], TabsSlice> = (set
         [tabId]: { status: 'connecting', messages: [], total: 0, lastEventId: prevId } as RealtimeState,
       },
     }));
-    openSse(
-      tabId,
-      { headers: proxyHeaders, body: sseBody },
-      {
-        onStatus: (status, info) =>
-          set((s) => {
-            const rt = s.realtime[tabId] ?? { status: 'idle', messages: [], total: 0 };
-            return {
-              realtime: {
-                ...s.realtime,
-                [tabId]: { ...rt, status, closeInfo: info, error: status === 'error' ? (info ?? 'error') : rt.error },
-              },
-            };
-          }),
-        onMessage: (dir, text, bytes) =>
-          set((s) => {
-            const rt = s.realtime[tabId];
-            if (!rt) return {};
-            return { realtime: { ...s.realtime, [tabId]: pushRtMessage(rt, dir, text, bytes) } };
-          }),
-        onId: (id) =>
-          set((s) => {
-            const rt = s.realtime[tabId];
-            if (!rt) return {};
-            return { realtime: { ...s.realtime, [tabId]: { ...rt, lastEventId: id } } };
-          }),
-      },
-    );
+    openSse(tabId, spec, prevId ?? null, rtHandlers(tabId, set));
   },
 });

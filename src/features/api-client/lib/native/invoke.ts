@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import type { HttpRequestSpec, ResponseMeta } from '../../types';
@@ -132,4 +132,46 @@ export function flushDone(): Promise<void> {
 /** Subscribes to the window-close flush request; resolves to the unlisten function. */
 export function onFlush(handler: () => void): Promise<() => void> {
   return listen('vectis://flush', () => handler());
+}
+
+/** Event on a realtime connection (mirrors `RtEvent` in crates/vectis-core/src/realtime, camelCase, tagged `type`). */
+export type RtEvent =
+  | { type: 'connecting' }
+  | { type: 'open' }
+  | { type: 'message'; text: string; bytes: number; binary: boolean }
+  | { type: 'sseEvent'; event: string; data: string; id: string | null }
+  | { type: 'closed'; code: number | null; reason: string }
+  | { type: 'error'; message: string };
+
+function eventChannel(onEvent: (e: RtEvent) => void): Channel<RtEvent> {
+  const ch = new Channel<RtEvent>();
+  ch.onmessage = onEvent;
+  return ch;
+}
+
+export function rtOpenWs(
+  connId: string,
+  url: string,
+  headers: [string, string][],
+  protocols: string[],
+  onEvent: (e: RtEvent) => void,
+): Promise<void> {
+  return invoke<void>('rt_open_ws', { connId, url, headers, protocols, onEvent: eventChannel(onEvent) });
+}
+
+export function rtOpenSse(
+  connId: string,
+  spec: HttpRequestSpec,
+  lastEventId: string | null,
+  onEvent: (e: RtEvent) => void,
+): Promise<void> {
+  return invoke<void>('rt_open_sse', { connId, spec, lastEventId, onEvent: eventChannel(onEvent) });
+}
+
+export function rtSend(connId: string, text: string): Promise<void> {
+  return invoke<void>('rt_send', { connId, text });
+}
+
+export function rtClose(connId: string): Promise<void> {
+  return invoke<void>('rt_close', { connId });
 }

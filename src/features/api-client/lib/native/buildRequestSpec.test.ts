@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildRequestSpec } from './buildRequestSpec';
+import { buildRequestSpec, buildWsRequest } from './buildRequestSpec';
 import type { EnvVar, TabState } from '../../types';
 
 const vars: EnvVar[] = [
@@ -277,5 +277,33 @@ describe('buildRequestSpec', () => {
       type: 'multipart',
       value: [{ name: 'upload', value: { type: 'file', value: { path: '/tmp/a.png', fileName: 'a.png' } } }],
     });
+  });
+});
+
+describe('buildWsRequest', () => {
+  it('keeps ws/wss as typed, resolves env, adds query + auth headers', () => {
+    const r = buildWsRequest(
+      tab({
+        url: 'wss://h/s',
+        params: [{ id: 'p', key: 'a', value: '{{tok}}', enabled: true } as never],
+        headers: [{ id: 'h', key: 'X', value: '1', enabled: true } as never],
+        auth: { ...tab().auth, type: 'bearer', bearer: '{{tok}}' },
+      }),
+      vars,
+      'r',
+    );
+    expect(r).toEqual({
+      url: 'wss://h/s?a=T9',
+      headers: [
+        ['X', '1'],
+        ['Authorization', 'Bearer T9'],
+      ],
+    });
+  });
+  it('converts typed http(s) to ws(s) and rejects other schemes', () => {
+    expect(buildWsRequest(tab({ url: '{{base}}/ws' }), vars, 'r')?.url).toBe('wss://api.x/ws');
+    expect(buildWsRequest(tab({ url: 'http://l/ws' }), vars, 'r')?.url).toBe('ws://l/ws');
+    expect(buildWsRequest(tab({ url: 'ftp://x' }), vars, 'r')).toBeNull();
+    expect(buildWsRequest(tab({ url: 'example.com' }), vars, 'r')).toBeNull();
   });
 });

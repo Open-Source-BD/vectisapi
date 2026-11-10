@@ -132,3 +132,25 @@ export function buildRequestSpec(
     timeoutMs: timeoutMs ?? null,
   };
 }
+
+/**
+ * WebSocket connect target: the tab's URL (env-resolved, query + auth query params applied)
+ * and headers (tab headers + auth), built with the same logic as `buildRequestSpec`.
+ * `ws(s)://` stays as typed; `http(s)://` is converted to `ws(s)://`. Returns null for any
+ * other scheme.
+ */
+export function buildWsRequest(
+  tab: TabState,
+  vars: EnvVar[],
+  requestId: string,
+): { url: string; headers: [string, string][] } | null {
+  const typed = resolveEnv(tab.url, vars).trim();
+  const m = /^(wss?|https?):\/\//i.exec(typed);
+  if (!m) return null;
+  const typedWs = /^ws/i.test(m[1]);
+  // buildRequestSpec only understands http(s); build on an http twin of a ws URL.
+  const httpUrl = typedWs ? typed.replace(/^ws/i, 'http') : typed;
+  const spec = buildRequestSpec({ ...tab, url: httpUrl }, vars, requestId);
+  const url = spec.url.replace(/^http/i, 'ws');
+  return { url, headers: spec.headers };
+}

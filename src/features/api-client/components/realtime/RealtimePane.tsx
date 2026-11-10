@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { selectActiveTab, useApiStore } from '../../store/useApiStore';
+import { WindowedList } from '@/components/ui/WindowedList';
+import type { RtMessage } from '../../types';
 import { UrlBar } from '../request/UrlBar';
 
 const STATUS_META: Record<string, { label: string; icon: string; color: string }> = {
@@ -11,6 +13,10 @@ const STATUS_META: Record<string, { label: string; icon: string; color: string }
 };
 
 const DIR_ICON = { sent: 'north_east', recv: 'south_west', system: 'info' } as const;
+
+/** Row height assumed until a row is measured (a single-line message at rest). */
+const estimateRow = () => 28;
+const messageKey = (m: RtMessage) => m.id;
 
 interface Props {
   send: () => void;
@@ -59,8 +65,8 @@ export function RealtimePane({ send }: Props) {
         </span>
       </div>
 
-      <div className="rt-log" aria-live="polite">
-        {messages.length === 0 && (
+      {messages.length === 0 ? (
+        <div className="rt-log" aria-live="polite">
           <div className="empty-state" style={{ padding: '40px 16px' }}>
             <span className="material-symbols-outlined" style={{ fontSize: '44px', opacity: 0.5 }}>
               swap_vert
@@ -73,20 +79,29 @@ export function RealtimePane({ send }: Props) {
                 : `Connect to ${isWs ? 'a WebSocket' : 'an SSE'} URL to start.`}
             </span>
           </div>
-        )}
-        {trimmed > 0 && <div className="rt-trim">… {trimmed} older messages trimmed</div>}
-        {messages.map((m) => (
-          <div key={m.id} className={`rt-row rt-${m.dir}`}>
-            <span className="material-symbols-outlined rt-dir" style={{ fontSize: '14px' }}>
-              {DIR_ICON[m.dir]}
-            </span>
-            <span className="rt-text">{m.text}</span>
-            <span className="rt-meta">
-              {m.bytes ? `${m.bytes}B` : ''} {new Date(m.ts).toLocaleTimeString()}
-            </span>
-          </div>
-        ))}
-      </div>
+        </div>
+      ) : (
+        <>
+          {trimmed > 0 && <div className="rt-trim">… {trimmed} older messages trimmed</div>}
+          <WindowedList
+            className="rt-log"
+            items={messages}
+            estimateHeight={estimateRow}
+            keyOf={messageKey}
+            renderItem={(m) => (
+              <div className={`rt-row rt-${m.dir}`}>
+                <span className="material-symbols-outlined rt-dir" style={{ fontSize: '14px' }}>
+                  {DIR_ICON[m.dir]}
+                </span>
+                <span className="rt-text">{m.text}</span>
+                <span className="rt-meta">
+                  {m.bytes ? `${m.bytes}B` : ''} {new Date(m.ts).toLocaleTimeString()}
+                </span>
+              </div>
+            )}
+          />
+        </>
+      )}
 
       {isWs && (
         <div className="rt-composer">
