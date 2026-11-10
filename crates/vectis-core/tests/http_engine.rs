@@ -345,6 +345,26 @@ async fn redirect_method_and_body_rules() {
 }
 
 #[tokio::test]
+async fn get_redirect_keeps_user_content_type() {
+    let base = server::spawn().await;
+    let (engine, _) = setup_with_jar();
+    for status in [301, 302, 303] {
+        let mut s = spec(
+            "GET",
+            format!("{base}/redirect-to?status={status}&to=/echo-headers"),
+        );
+        s.headers = vec![h("Content-Type", "application/json")];
+        let (meta, body) = engine.send(s).await.unwrap();
+        assert_eq!(meta.status, 200);
+        assert_eq!(
+            echoed(&body, "content-type"),
+            vec!["application/json"],
+            "status {status}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn decompresses_gzip_brotli_zstd() {
     let base = server::spawn().await;
     let (engine, _, _) = setup();

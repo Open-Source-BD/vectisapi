@@ -11,7 +11,7 @@ use dashmap::DashMap;
 use futures_util::StreamExt;
 use reqwest::header::{
     HeaderMap, HeaderName, HeaderValue, AUTHORIZATION, CONTENT_ENCODING, CONTENT_LENGTH,
-    CONTENT_TYPE, COOKIE, LOCATION, SET_COOKIE, TRANSFER_ENCODING,
+    CONTENT_TYPE, COOKIE, HOST, LOCATION, SET_COOKIE, TRANSFER_ENCODING,
 };
 use reqwest::multipart::{Form, Part};
 use reqwest::{Method, RequestBuilder, Version};
@@ -143,11 +143,12 @@ impl HttpEngine {
                 ));
             }
             redirects += 1;
-            if !same_host(&url, &next) {
-                // Never leak credentials to another host (curl and browsers do the same).
-                headers.remove(AUTHORIZATION);
-            }
-            if matches!(response.status().as_u16(), 301..=303) && method != Method::HEAD {
+            strip_on_hop(&url, &next, &mut headers);
+            // 301/302/303 turn other methods into a body-less GET; GET and HEAD go unchanged.
+            if matches!(response.status().as_u16(), 301..=303)
+                && method != Method::GET
+                && method != Method::HEAD
+            {
                 method = Method::GET;
                 body = &no_body;
                 for name in [
@@ -236,9 +237,18 @@ fn redirect_target(response: &reqwest::Response, current: &Url) -> Option<Url> {
     matches!(next.scheme(), "http" | "https").then_some(next)
 }
 
-/// Same host name; a scheme or port change alone (e.g. an http → https upgrade) keeps credentials.
-fn same_host(a: &Url, b: &Url) -> bool {
-    a.host_str() == b.host_str()
+/// Removes headers that must not follow a redirect from `prev` to `next`: `Authorization` when
+/// the host changes or https downgrades to http (no token leaks; curl and browsers do the same),
+/// and a user-set `Host` when the host changes. `Proxy-Authorization` targets the proxy and stays.
+fn strip_on_hop(prev: &Url, next: &Url, headers: &mut HeaderMap) {
+    let host_changed = prev.host_str() != next.host_str();
+    let downgraded = prev.scheme() == "https" && next.scheme() == "http";
+    if host_changed || downgraded {
+        headers.remove(AUTHORIZATION);
+    }
+    if host_changed {
+        headers.remove(HOST);
+    }
 }
 
 fn parse_url(raw: &str) -> Result<Url, CoreError> {
@@ -375,4 +385,57 @@ fn version_label(version: Version) -> String {
 
 fn elapsed_ms(since: Instant) -> f64 {
     since.elapsed().as_secs_f64() * 1000.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reqwest::header::PROXY_AUTHORIZATION;
+
+    fn hop(prev: &str, next: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer t"));
+        headers.insert(HOST, HeaderValue::from_static("api.example.com"));
+        headers.insert(PROXY_AUTHORIZATION, HeaderValue::from_static("Basic p"));
+        headers.insert("x-keep", HeaderValue::from_static("1"));
+        strip_on_hop(
+            &Url::parse(prev).unwrap(),
+            &Url::parse(next).unwrap(),
+            &mut headers,
+        );
+        headers
+    }
+
+    #[test]
+    fn strip_on_hop_host_change() {
+        let h = hop("https://api.example.com/a", "https://evil.test/b");
+        assert!(!h.contains_key(AUTHORIZATION));
+        assert!(!h.contains_key(HOST));
+        assert!(h.contains_key(PROXY_AUTHORIZATION));
+        assert!(h.contains_key("x-keep"));
+    }
+
+    #[test]
+    fn strip_on_hop_https_to_http_downgrade() {
+        let h = hop("https://api.example.com/a", "http://api.example.com/b");
+        assert!(!h.contains_key(AUTHORIZATION));
+        assert!(h.contains_key(HOST));
+        assert!(h.contains_key(PROXY_AUTHORIZATION));
+    }
+
+    #[test]
+    fn strip_on_hop_same_origin_and_upgrade_keep() {
+        for (prev, next) in [
+            ("https://api.example.com/a", "https://api.example.com/b"),
+            ("http://api.example.com/a", "https://api.example.com/b"),
+            (
+                "http://api.example.com:8080/a",
+                "http://api.example.com:9090/b",
+            ),
+        ] {
+            let h = hop(prev, next);
+            assert!(h.contains_key(AUTHORIZATION), "{prev} -> {next}");
+            assert!(h.contains_key(HOST), "{prev} -> {next}");
+        }
+    }
 }

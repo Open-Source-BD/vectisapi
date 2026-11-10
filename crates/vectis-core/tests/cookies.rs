@@ -206,3 +206,49 @@ fn json_roundtrip() {
         .list()
         .is_empty());
 }
+
+#[test]
+fn public_suffix_domain_rejected() {
+    let jar = CookieJar::new();
+    set(&jar, "http://a.co.uk/", &["uk=1; Domain=co.uk; Path=/"]);
+    set(&jar, "http://a.com/", &["tld=1; Domain=com; Path=/"]);
+    set(
+        &jar,
+        "https://x.vercel.app/",
+        &["priv=1; Domain=.vercel.app; Path=/"],
+    );
+    assert!(jar.list().is_empty(), "{:?}", jar.list());
+    assert_eq!(jar.header_for(&u("http://b.co.uk/")), None);
+    assert_eq!(jar.header_for(&u("https://y.vercel.app/")), None);
+}
+
+#[test]
+fn public_suffix_domain_equal_to_host_is_host_only() {
+    // RFC 6265 §5.3 step 5: Domain equal to the request host → host-only cookie.
+    let jar = CookieJar::new();
+    set(
+        &jar,
+        "https://vercel.app/",
+        &["h=1; Domain=vercel.app; Path=/"],
+    );
+    assert_eq!(
+        jar.header_for(&u("https://vercel.app/")).as_deref(),
+        Some("h=1")
+    );
+    assert_eq!(jar.header_for(&u("https://x.vercel.app/")), None);
+}
+
+#[test]
+fn registrable_domain_accepted() {
+    let jar = CookieJar::new();
+    set(
+        &jar,
+        "http://api.example.co.uk/",
+        &["reg=1; Domain=example.co.uk; Path=/"],
+    );
+    assert_eq!(
+        jar.header_for(&u("http://www.example.co.uk/")).as_deref(),
+        Some("reg=1")
+    );
+    assert_eq!(jar.header_for(&u("http://other.co.uk/")), None);
+}
