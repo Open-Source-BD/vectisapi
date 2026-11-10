@@ -1,7 +1,10 @@
 # Performance
 
 Measured 2026-11-11 on the release build (`lto = "fat"`, `codegen-units = 1`, `opt-level = 3`,
-`strip`, `panic = "abort"`), commit after Task 16.
+`strip`, `panic = "abort"`) with `rustc 1.96.0 (ac68faa20 2026-05-25)`. App build and cold-start /
+RAM / size numbers: commit `55f4570`. Benchmarks (`overhead.rs`, `large-body.spec.ts`, the 10k
+search print) ran from the working tree at that commit plus the history-snapshot fix (`f6bc746`);
+they were committed in `f2808d1`.
 
 Machine: MacBook Air M2 (Mac14,2), 8 GB RAM, macOS 26.6.2. The machine was shared and busy
 (load average 4–9, disk 95 % full), so startup and memory numbers vary run to run.
@@ -10,14 +13,14 @@ Machine: MacBook Air M2 (Mac14,2), 8 GB RAM, macOS 26.6.2. The machine was share
 
 | Metric | Target | Result | Status |
 |--------|--------|--------|--------|
-| Per-request engine overhead (local server, median of 100) | < 5 ms | **4–8 µs** over raw reqwest (engine median 41–79 µs) | Met |
+| Per-request engine overhead (local server, median of 100) | < 5 ms | **3.5–7.5 µs** over raw reqwest (engine median 41–79 µs) | Met |
 | 50 MB body → first paint of the body view | < 300 ms | **23–32 ms** Chromium, **13–18 ms** WebKit (UI side, see method) | Met (UI side) |
-| "Load full body" on a 50 MB body | (no target; ruling: accept ≤ 0.5 s hitch) | **48–88 ms**, longest main-thread task **≤ 58 ms** | OK |
-| Send after a 50 MB body was fully loaded | < 300 ms, UI never blocks | **14–31 ms** (was 315–814 ms before this task's fix) | Met (fixed) |
+| "Load full body" on a 50 MB body | (no target; ruling: accept ≤ 0.5 s hitch) | **48–76 ms**, longest main-thread task **≤ 58 ms** (Chromium) | OK |
+| Send after a 50 MB body was fully loaded | < 300 ms, UI never blocks | **14–30 ms** (315–814 ms before this task's fix, see below) | Met (fixed) |
 | History search over 10k entries | < 50 ms | **0.70–0.89 ms** | Met |
-| Installer size (macOS) | < 15 MB | **6.3 MB** `.dmg` (`.app` 12.0 MB unpacked) | Met |
-| Cold start: process launch → main window on screen | < 1 s | **284–1934 ms**, median ≈ 800 ms over 10 runs; 2 of 10 over 1 s | Mostly met (see notes) |
-| Idle RAM after 10 s | < 150 MB | main process RSS 24–111 MB; whole app (main + WebKit helpers) **phys footprint 80–207 MB, median 93 MB** | Met at median, **missed in 2 of 6 runs** |
+| Installer size | < 15 MB | **6.3 MB** — the local **aarch64-only** `.dmg` (`.app` 12.0 MB unpacked). The shipped artifacts (universal `.dmg`, MSI/NSIS, AppImage/deb) were not built here | **Unverified for shipped artifacts** (see Open items) |
+| Cold start: process launch → main window on screen | < 1 s | **284–1934 ms**, median ≈ 800 ms over 10 runs | **Missed in 2/10 runs (> 1 s); median ~800 ms; metric = window on screen, not interactive** (see Open items) |
+| Idle RAM after 10 s | < 150 MB | main process RSS 23–109 MB; whole app (main + WebKit helpers) **phys footprint 80–207 MB, median 93 MB** | **Missed in 2/6 runs (180, 207 MB phys footprint); median 93 MB — re-measure on idle machine** (see Open items) |
 
 ## Methods and raw numbers
 
@@ -70,8 +73,9 @@ real app; see `docs/manual-smoke.md` §5).
 
 **Bug found and fixed:** each successful send deep-cloned the whole tab, including `prevResponse`,
 for the history snapshot (`JSON.parse(JSON.stringify(tab))`), and stored it in history. After
-"Load full body" that was 100+ MB of JSON per send: 315–814 ms of blocked UI, and the body written
-into SQLite. The snapshot now drops both responses before cloning (`src/features/api-client/lib/sendActive.ts`,
+"Load full body" that was 100+ MB of JSON per send, and the body was written into SQLite. Same
+spec, run before the fix ("send replacing a fully loaded 50 MB view", 3×): Chromium 315, 749,
+798 ms; WebKit 316, 814, 724 ms. The snapshot now drops both responses before cloning (`src/features/api-client/lib/sendActive.ts`,
 covered by `sendActive.test.ts`).
 
 ### History search, 10k entries
@@ -95,9 +99,10 @@ cargo test --release -p vectis-core --test db -- --nocapture history_search_fts_
 
 The Material Symbols font is subset to the 89 icons the UI uses: 65 KB instead of 3.8 MB
 (`scripts/subset-icons.py`, offline with fontTools; guarded by `src/test/iconSubset.test.ts`).
-Windows (msi/nsis) and Linux (AppImage/deb) sizes come from the release workflow and aren't
-measured here; the binary is the same Rust + embedded frontend, so they should be comparable
-(AppImage bundles WebKitGTK-adjacent libraries and is larger by design).
+Only the local aarch64 `.dmg` was built. The release workflow ships a universal macOS `.dmg`
+(two architectures, so roughly twice the binary), Windows MSI/NSIS and Linux AppImage/deb (the
+AppImage bundles libraries and is larger by design). None of those were built or measured here, so
+the < 15 MB target is unverified for them (Open items).
 
 ### Cold start and idle RAM
 
@@ -126,9 +131,31 @@ Notes:
 - "Window on screen" is when macOS shows the window, not when the UI is interactive (the webview
   may still be loading); "interactive" is not measurable headlessly. Runs 1–4 were launched while
   the machine's load average was ~9; runs 8–10 at ~4.
-- Low RSS in runs 1–4 is the OS compressing a background app's memory (the app was never
-  frontmost); `footprint` is the better number. Footprint met < 150 MB in 4 of 6 runs; runs 7 and 10
-  (180 / 207 MB) missed it, driven by the WebContent process (72–94 MB RSS).
-- Main-process RSS alone (the brief's `ps -o rss=`) is 24–111 MB: always < 150 MB.
-- Cold start and RAM should be re-checked on an idle machine and on Windows (WebView2) per
-  `docs/manual-smoke.md` §8.
+- Runs 1–4 have low RSS; the likely cause (not verified) is the OS compressing a background
+  app's memory (the app was never frontmost). `footprint` was only recorded for runs 5–10 and is
+  the better number: < 150 MB in 4 of 6 runs; runs 7 and 10 (180 / 207 MB) missed it, with most of
+  the helpers' RSS in those runs in the WebContent process.
+- Main-process RSS alone (the brief's `ps -o rss=`) is 23–109 MB: always < 150 MB.
+
+## Open items
+
+1. **Idle RAM (missed in 2/6 runs).** Re-measure on an idle machine (load average < 1, nothing else
+   heavy running), app frontmost:
+   1. `npm run tauri build`; quit other apps.
+   2. Launch `target/release/bundle/macos/VectisAPI.app` from Finder and leave it frontmost for 10 s.
+   3. `footprint -p <vectisapi pid> -p <each com.apple.WebKit.* pid started after launch>` and
+      read "Summary Footprint" (also Activity Monitor → Memory, sum of the app + its WebKit helpers).
+   4. Repeat 10×; report median and max against < 150 MB. Repeat on Windows (Task Manager, app +
+      `msedgewebview2.exe` children) and Linux (`smem`/`ps` for the app + `WebKitWebProcess`).
+2. **Cold start (missed in 2/10 runs, window on screen only).** On the same idle machine:
+   1. Launch the release binary 10× (after a reboot for the first, truly cold run) with the
+      window poller used here (launch in background, poll `CGWindowListCopyWindowInfo` for an
+      on-screen layer-0 window of the pid every 2 ms), or with a stopwatch from double-click.
+   2. Additionally time "interactive": add a temporary `console.time` / `performance.mark` when the
+      UI's `hydrated` flag becomes true and read it via the Web Inspector of a debug build, or click
+      the URL bar as soon as possible and note when typing works.
+   3. Report median and max against < 1 s (macOS and Windows).
+3. **Installer size for shipped artifacts.** Run the release workflow (push a `v*` tag in a fork or
+   a dry-run tag) and record the size of each draft-release asset: universal `.dmg`, `.msi`,
+   NSIS `-setup.exe`, `.AppImage`, `.deb`. Compare each against < 15 MB; if the universal `.dmg`
+   or the AppImage misses, decide whether to ship per-arch dmgs / accept the AppImage size.

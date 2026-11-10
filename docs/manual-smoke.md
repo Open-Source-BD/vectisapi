@@ -140,3 +140,13 @@ Expected: same behaviour as macOS; the window icon is the blue "V" tile; fonts a
 Expected: the window appears with the UI interactive in under 1 s; Activity Monitor / Task Manager
 shows total memory for the app's processes (app + WebContent/WebView2 helpers) under ~150 MB at
 idle.
+
+## 9. Modal backdrop blur in the real webview
+
+1. Open any modal (Environments, Cookies via Cmd/Ctrl+K → "Manage cookies", Settings).
+
+Expected: the app behind the modal is dimmed **and slightly blurred**, as in
+`docs/fidelity/4-env-modal-light-np.png` (NP, Chromium). Headless Playwright WebKit showed a flat
+grey scrim without blur (`*-va-webkit.png`); record whether WKWebView (macOS), WebView2 (Windows)
+and WebKitGTK (Linux) blur. If one doesn't, note the OS/webview version: the CSS uses unprefixed
+`backdrop-filter`, which older WebKit only supports as `-webkit-backdrop-filter`.

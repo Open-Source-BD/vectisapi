@@ -36,7 +36,11 @@ Dark mode is covered by the `-dark` variant of every state.
 ## Every visible difference
 
 Pixel diff NP vs VA (Chromium, threshold 24/255) is 0.05–0.7 % of the frame per state after the
-fixes below. Each remaining region:
+fixes below. These percentages were measured on the raw (unquantized) captures, which are not
+committed; `scripts/fidelity-diff.py` reproduces them from a fresh capture
+(`FIDELITY_OUT=<dir> npx playwright test -c playwright.tools.config.ts fidelity`, then
+`python3 scripts/fidelity-diff.py <dir>`). Run on the committed quantized PNGs it reports similar
+bands with a little extra quantization noise. Each remaining region:
 
 | Where | Difference | Verdict |
 |-------|------------|---------|
@@ -65,6 +69,12 @@ The WebKit set shows the same layout in every state, light and dark. Differences
 rendering only: native `<select>` controls draw macOS-style up/down chevrons, text is rasterized
 slightly differently, and the locale date in the cookie hint reads `Jan 1, 2030 at 6:00 AM`
 (WebKit's `Intl`) instead of `Jan 1, 2030, 6:00 AM`. No clipping, overflow or missing icons.
+
+Modal scrim: in Chromium (NP and VA) the page behind an open modal is blurred
+(`.md-modal-overlay { backdrop-filter: blur(2px) }`, unchanged from NP); in the Playwright WebKit
+captures it is a flat grey scrim with no blur. This is treated as an engine artifact of headless
+Playwright WebKit, not a VA bug (the CSS is NP's, byte for byte). Whether the real WKWebView /
+WebKitGTK blurs is a manual check: `docs/manual-smoke.md` §9.
 
 The CSP check (`e2e/csp.spec.ts`) passes in both engines: with the production CSP on the HTML
 (`script-src 'self'`, no `'unsafe-eval'`), a pre-request script still runs in the worker.

@@ -1,9 +1,9 @@
 name: Release
 
+# Tag-only: a manual run would create a draft release named after the branch.
 on:
   push:
     tags: ['v*']
-  workflow_dispatch:
 
 jobs:
   build:

@@ -108,7 +108,10 @@ describe('executeActiveSend', () => {
     mockExec.mockResolvedValue({ response: proxyRes('{"new":true}') });
 
     const state = mockState();
+    const headers = [{ id: 'h1', key: 'X-Trace', value: 'abc' }];
     Object.assign(state.tabs[0], {
+      method: 'PUT',
+      headers,
       response: { ...proxyRes('x'.repeat(1000)), testResults: [] },
       prevResponse: { ...proxyRes('y'.repeat(1000)), testResults: [] },
     });
@@ -118,6 +121,10 @@ describe('executeActiveSend', () => {
     const item = (state.addHistory as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(item.request.response).toBeNull();
     expect(item.request.prevResponse).toBeNull();
+    // The request itself survives the clone.
+    expect(item.request.url).toBe('https://example.test');
+    expect(item.request.method).toBe('PUT');
+    expect(item.request.headers).toEqual(headers);
   });
 
   it('leaves the timeout to the engine (live settings)', async () => {
