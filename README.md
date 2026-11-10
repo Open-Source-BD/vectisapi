@@ -26,11 +26,11 @@ web server or the browser. No CORS, no proxy, no account, no network calls of it
 Download the installer for your OS from the
 [Releases](../../releases) page:
 
-| OS | File |
-|----|------|
-| macOS (Apple silicon + Intel) | `VectisAPI_<version>_universal.dmg` |
-| Windows | `VectisAPI_<version>_x64-setup.exe` (NSIS) or `.msi` |
-| Linux | `VectisAPI_<version>_amd64.AppImage` or `.deb` |
+| OS                            | File                                                 |
+| ----------------------------- | ---------------------------------------------------- |
+| macOS (Apple silicon + Intel) | `VectisAPI_<version>_universal.dmg`                  |
+| Windows                       | `VectisAPI_<version>_x64-setup.exe` (NSIS) or `.msi` |
+| Linux                         | `VectisAPI_<version>_amd64.AppImage` or `.deb`       |
 
 The builds are **not code-signed**:
 
@@ -54,11 +54,11 @@ WEBKIT_DISABLE_DMABUF_RENDERER=1 vectisapi
 Everything (collections, environments, globals, tabs, history, cookies, settings) is in one SQLite
 file, `vectisapi.db`, in the OS app-data folder:
 
-| OS | Folder |
-|----|--------|
-| macOS | `~/Library/Application Support/dev.vectisapi.app/` |
-| Windows | `%APPDATA%\dev.vectisapi.app\` |
-| Linux | `~/.local/share/dev.vectisapi.app/` (or `$XDG_DATA_HOME/dev.vectisapi.app/`) |
+| OS      | Folder                                                                       |
+| ------- | ---------------------------------------------------------------------------- |
+| macOS   | `~/Library/Application Support/dev.vectisapi.app/`                           |
+| Windows | `%APPDATA%\dev.vectisapi.app\`                                               |
+| Linux   | `~/.local/share/dev.vectisapi.app/` (or `$XDG_DATA_HOME/dev.vectisapi.app/`) |
 
 **Settings → Open data folder** opens it. **Settings → Export all / Import all** writes and restores
 a full backup file. Response bodies are kept in memory only (up to the store cap set in Settings).
