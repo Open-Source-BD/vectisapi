@@ -290,6 +290,24 @@ async fn import_unknown_version_changes_nothing() {
     assert_eq!(db.load_workspace().await.unwrap(), before);
 }
 
+#[tokio::test]
+async fn import_backup_item_without_id_rejected_and_changes_nothing() {
+    let db = Db::open_in_memory().unwrap();
+    db.save_entities(all_kinds()).await.unwrap();
+    let before = db.load_workspace().await.unwrap();
+    for (key, item) in [
+        ("collections", json!({"name": "no id"})),
+        ("collections", json!({"id": "", "name": "empty id"})),
+        ("environments", json!({"id": null})),
+        ("tabs", json!({"title": "t"})),
+    ] {
+        let backup = json!({"version": 1, key: [item]});
+        let err = db.import_backup(backup.to_string()).await.unwrap_err();
+        assert!(err.message.contains("has no id"), "{key}: {}", err.message);
+    }
+    assert_eq!(db.load_workspace().await.unwrap(), before);
+}
+
 #[test]
 fn newer_schema_version_refuses_with_clear_error() {
     let dir = tempfile::tempdir().unwrap();

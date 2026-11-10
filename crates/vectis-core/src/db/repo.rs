@@ -384,6 +384,18 @@ pub fn import_backup(conn: &mut Connection, text: &str) -> Result<(), CoreError>
         )));
     }
     let b: Backup = serde_json::from_value(raw)?;
+    for (kind, items) in [
+        ("collection", &b.collections),
+        ("environment", &b.environments),
+        ("tab", &b.tabs),
+    ] {
+        if let Some(i) = items.iter().position(|v| str_field(v, "id").is_empty()) {
+            return Err(other(format!(
+                "invalid backup: {kind} #{} has no id",
+                i + 1
+            )));
+        }
+    }
 
     let tx = conn.transaction()?;
     for table in [
