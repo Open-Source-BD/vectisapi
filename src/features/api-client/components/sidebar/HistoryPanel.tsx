@@ -1,12 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useApiStore } from '../../store/useApiStore';
 import { filterHistory, groupHistoryByDate } from '../../lib/historyGroup';
-import { searchHistory } from '../../lib/native/invoke';
 import type { HistoryItem } from '../../types';
 import { WindowedList } from '@/components/ui/WindowedList';
 
-const SEARCH_DEBOUNCE_MS = 150;
-const DEFAULT_SEARCH_LIMIT = 1000;
 /** Estimates for rows not yet measured (natural CSS sizes at rest). */
 const LABEL_ESTIMATE = 25;
 const ROW_ESTIMATE = 34;
@@ -27,43 +24,9 @@ export function HistoryPanel() {
   const replayHistory = useApiStore((s) => s.replayHistory);
   const openSaveModalForHistory = useApiStore((s) => s.openSaveModalForHistory);
 
-  const limit = useApiStore((s) => s.settings?.historyLimit) ?? DEFAULT_SEARCH_LIMIT;
-
-  // A non-empty query is answered by SQLite (FTS); the in-memory filter covers the gap until the
-  // answer arrives and any search failure.
-  const query = search.trim();
-  const [found, setFound] = useState<{ query: string; items: HistoryItem[] } | null>(null);
-  useEffect(() => {
-    if (!query) return;
-    let cancelled = false;
-    const timer = setTimeout(() => {
-      searchHistory(query, limit)
-        .then((rows) => {
-          if (cancelled) return;
-          const items: HistoryItem[] = [];
-          for (const row of rows) {
-            try {
-              items.push(JSON.parse(row) as HistoryItem);
-            } catch {
-              // skip an unreadable row
-            }
-          }
-          setFound({ query, items });
-        })
-        .catch((e: unknown) => console.warn('search_history failed', e));
-    }, SEARCH_DEBOUNCE_MS);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [query, limit]);
-
-  const filtered = useMemo(() => {
-    if (!query) return history;
-    if (found?.query !== query) return filterHistory(history, query);
-    const live = new Set(history.map((h) => h.id)); // a row deleted mid-search must disappear
-    return found.items.filter((h) => live.has(h.id));
-  }, [history, query, found]);
+  // The whole (capped) history is in memory; next-postman's substring filter over 10k items takes
+  // milliseconds, so there is no round trip to SQLite.
+  const filtered = useMemo(() => filterHistory(history, search), [history, search]);
 
   const rows = useMemo(() => {
     const out: Row[] = [];

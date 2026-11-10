@@ -168,11 +168,6 @@ export function addHistoryNative(args: {
   return invoke<void>('add_history', { ...args, limit: args.limit ?? null });
 }
 
-/** Matching history items (JSON strings), newest first. */
-export function searchHistory(q: string, limit: number): Promise<string[]> {
-  return invoke<string[]>('search_history', { q, limit });
-}
-
 export function flushDone(): Promise<void> {
   return invoke<void>('flush_done');
 }

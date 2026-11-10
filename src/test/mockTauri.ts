@@ -184,8 +184,6 @@ export function installTauriMocks(): void {
         }
         case 'cookies_list':
           return opts.cookies ?? [];
-        case 'search_history':
-          return [];
         case 'rt_open_ws':
           rtOpen(a.connId as string, a.onEvent as Channel<RtEvent>, false);
           return null;
