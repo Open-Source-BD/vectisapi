@@ -35,7 +35,7 @@ Dark mode is covered by the `-dark` variant of every state.
 
 ## Every visible difference
 
-Pixel diff NP vs VA (Chromium, threshold 24/255) is 0.05–0.7 % of the frame per state after the
+Pixel diff NP vs VA (Chromium; per-pixel difference converted to luminance, threshold 24/255) is 0.05–0.7 % of the frame per state after the
 fixes below. These percentages were measured on the raw (unquantized) captures, which are not
 committed; `scripts/fidelity-diff.py` reproduces them from a fresh capture
 (`FIDELITY_OUT=<dir> npx playwright test -c playwright.tools.config.ts fidelity`, then

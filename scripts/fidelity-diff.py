@@ -4,7 +4,8 @@
     FIDELITY_OUT=/tmp/fid npx playwright test -c playwright.tools.config.ts fidelity
     python3 scripts/fidelity-diff.py /tmp/fid
 
-For each `<state>-<theme>-np.png` / `-va.png` pair: % of pixels whose channel difference exceeds 24/255,
+For each `<state>-<theme>-np.png` / `-va.png` pair: % of pixels whose difference, converted to
+luminance (Pillow mode "L"), exceeds 24/255,
 and the row bands (y0, y1, x0, x1) where they differ. Run it on raw captures: the committed copies in
 docs/fidelity/ are palette-quantized, which adds its own noise.
 """

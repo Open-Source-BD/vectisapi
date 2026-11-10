@@ -133,8 +133,7 @@ Notes:
   the machine's load average was ~9; runs 8–10 at ~4.
 - Runs 1–4 have low RSS; the likely cause (not verified) is the OS compressing a background
   app's memory (the app was never frontmost). `footprint` was only recorded for runs 5–10 and is
-  the better number: < 150 MB in 4 of 6 runs; runs 7 and 10 (180 / 207 MB) missed it, with most of
-  the helpers' RSS in those runs in the WebContent process.
+  the better number: < 150 MB in 4 of 6 runs; runs 7 and 10 (180 / 207 MB) missed it.
 - Main-process RSS alone (the brief's `ps -o rss=`) is 23–109 MB: always < 150 MB.
 
 ## Open items
