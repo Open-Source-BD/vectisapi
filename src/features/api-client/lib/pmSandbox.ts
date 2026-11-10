@@ -34,7 +34,7 @@ export interface Pm {
 function compile(src: string): (pm: Pm) => void {
   let fn: (...args: unknown[]) => void;
   try {
-    fn = new Function('pm', 'window', 'document', src);
+    fn = new Function('pm', 'window', 'document', src) as typeof fn;
   } catch (e) {
     // Eval refused by the CSP surfaces as EvalError; make that diagnosable.
     if (e instanceof EvalError) throw new Error('Scripts are blocked by the content security policy');
