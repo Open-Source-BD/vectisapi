@@ -11,7 +11,10 @@ export interface KvItem {
   key: string;
   value: string;
   type?: KvItemType;
-  file?: File | null;
+  /** Absolute disk path of the chosen file (form-data file items); streamed by Rust. */
+  filePath?: string;
+  /** Display/upload name (basename of filePath). */
+  fileName?: string;
 }
 
 export type AuthType = 'none' | 'bearer' | 'basic' | 'apikey' | 'oauth2' | 'jwt';

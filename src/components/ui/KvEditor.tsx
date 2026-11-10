@@ -1,11 +1,13 @@
 import type { ReactNode } from 'react';
+import { pickFile } from '@/features/api-client/lib/native/invoke';
 
 interface KvItem {
   id: string;
   key: string;
   value: string;
   type?: 'text' | 'file';
-  file?: File | null;
+  filePath?: string;
+  fileName?: string;
 }
 
 interface KvEditorProps {
@@ -45,11 +47,17 @@ export function KvEditor({ items, onChange, allowFile = false, renderRowExtra }:
             </select>
           )}
           {item.type === 'file' ? (
-            <input
-              type="file"
-              className="md-input kv-input"
-              onChange={(e) => patch(idx, { file: e.target.files?.[0] ?? null })}
-            />
+            <button
+              type="button"
+              className="md-input kv-input kv-file-btn"
+              title={item.filePath}
+              onClick={async () => {
+                const picked = await pickFile();
+                if (picked) patch(idx, { filePath: picked.path, fileName: picked.name });
+              }}
+            >
+              {item.fileName || 'Choose file'}
+            </button>
           ) : (
             <input
               className="md-input kv-input"

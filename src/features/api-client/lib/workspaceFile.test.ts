@@ -108,7 +108,7 @@ describe('workspaceFile', () => {
         method: 'POST',
         body: {
           type: 'formdata',
-          formdata: [{ id: 'k', key: 'f', value: '', type: 'file', file: new File(['x'], 'x.txt') }],
+          formdata: [{ id: 'k', key: 'f', value: '', type: 'file', filePath: '/tmp/x.txt', fileName: 'x.txt' }],
           urlencoded: [],
           rawContent: '',
           rawType: 'application/json',
@@ -119,7 +119,8 @@ describe('workspaceFile', () => {
     const upload = back.collections[0].children.find((c) => c.name === 'Upload');
     const fd = (upload as { request: TabState }).request.body.formdata[0];
     expect(fd.type).toBe('file');
-    expect(fd.file).toBeNull();
+    expect(fd.filePath).toBe('/tmp/x.txt');
+    expect(fd.fileName).toBe('x.txt');
   });
 
   it('splits secret-named vars into gitignored *.secret.json, not the versioned file', () => {

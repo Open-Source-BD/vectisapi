@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { open } from '@tauri-apps/plugin-dialog';
 import type { HttpRequestSpec, ResponseMeta } from '../../types';
 import { decodeSendFrame, toBytes, type RawBytes } from './decodeResponse';
 
@@ -64,4 +65,11 @@ export function cookiesClearDomain(domain: string): Promise<void> {
 
 export function cookiesClear(): Promise<void> {
   return invoke<void>('cookies_clear');
+}
+
+/** Native single-file picker for form-data file parts; null when cancelled. */
+export async function pickFile(): Promise<{ path: string; name: string } | null> {
+  const path = await open({ multiple: false, directory: false });
+  if (!path) return null;
+  return { path, name: path.split(/[\\/]/).pop() || path };
 }

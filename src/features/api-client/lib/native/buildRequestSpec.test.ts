@@ -247,7 +247,7 @@ describe('buildRequestSpec', () => {
           formdata: [
             { id: 'k', key: 'f', value: '{{tok}}', type: 'text' },
             { id: 'e', key: '', value: 'skip', type: 'text' },
-            // File parts need a disk path (Task 9); without one they are skipped.
+            // A file item without a chosen path is skipped.
             { id: 'u', key: 'upload', value: '', type: 'file' },
           ],
           urlencoded: [],
@@ -258,5 +258,24 @@ describe('buildRequestSpec', () => {
     );
     expect(s.body).toEqual({ type: 'multipart', value: [{ name: 'f', value: { type: 'text', value: 'T9' } }] });
     expect(header(s.headers, 'Content-Type')).toBeUndefined();
+  });
+
+  it('formdata file item emits File part with path', () => {
+    const s = build(
+      tab({
+        method: 'POST',
+        body: {
+          type: 'formdata',
+          formdata: [{ id: 'u', key: 'upload', value: '', type: 'file', filePath: '/tmp/a.png', fileName: 'a.png' }],
+          urlencoded: [],
+          rawContent: '',
+          rawType: 'application/json',
+        },
+      }),
+    );
+    expect(s.body).toEqual({
+      type: 'multipart',
+      value: [{ name: 'upload', value: { type: 'file', value: { path: '/tmp/a.png', fileName: 'a.png' } } }],
+    });
   });
 });

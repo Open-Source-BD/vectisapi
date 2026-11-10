@@ -3,17 +3,6 @@ import type { StoreState } from './types';
 import type { WorkspaceStatus } from './uiSlice';
 import { serializeWorkspace, deserializeWorkspace } from '../../lib/workspaceFile';
 import { zipFiles, unzipFiles } from '../../lib/zipWorkspace';
-import type { Collection, TreeNode } from '../../types';
-
-const FILE_BODY_WARNED_KEY = 'next-postman-file-body-warned';
-
-function anyFileBody(cols: Collection[]): boolean {
-  const walk = (nodes: TreeNode[]): boolean =>
-    nodes.some((n) =>
-      n.type === 'folder' ? walk(n.children) : n.request.body.formdata.some((f) => f.type === 'file' && f.file),
-    );
-  return cols.some((c) => walk(c.children));
-}
 
 export interface WorkspaceSlice {
   workspaceStatus: WorkspaceStatus;
@@ -103,16 +92,6 @@ export const createWorkspaceSlice: StateCreator<StoreState, [], [], WorkspaceSli
         return;
       }
       const { collections, environments, globals } = get();
-      if (
-        typeof localStorage !== 'undefined' &&
-        !localStorage.getItem(FILE_BODY_WARNED_KEY) &&
-        anyFileBody(collections)
-      ) {
-        localStorage.setItem(FILE_BODY_WARNED_KEY, '1');
-        alert(
-          "Heads up: file attachments in form-data bodies are not written to the folder (the file itself can't be serialized). Everything else is saved — re-attach files after loading elsewhere.",
-        );
-      }
       await writeWorkspace(wsHandle, serializeWorkspace({ collections, environments, globals }));
       set({ workspaceStatus: 'connected' as WorkspaceStatus });
     } catch (e) {
@@ -161,16 +140,6 @@ export const createWorkspaceSlice: StateCreator<StoreState, [], [], WorkspaceSli
     set({ workspaceBusy: true, workspaceError: null });
     try {
       const { collections, environments, globals } = get();
-      if (
-        typeof localStorage !== 'undefined' &&
-        !localStorage.getItem(FILE_BODY_WARNED_KEY) &&
-        anyFileBody(collections)
-      ) {
-        localStorage.setItem(FILE_BODY_WARNED_KEY, '1');
-        alert(
-          "Heads up: file attachments in form-data bodies are not written to the zip (the file itself can't be serialized). Everything else is saved — re-attach files after importing.",
-        );
-      }
       const blob = await zipFiles(serializeWorkspace({ collections, environments, globals }));
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');

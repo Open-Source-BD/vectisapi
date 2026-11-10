@@ -93,8 +93,13 @@ export function buildRequestSpec(
       const parts: MultipartPart[] = [];
       tab.body.formdata.forEach((item) => {
         if (!item.key) return;
-        // File parts are streamed from a disk path (Task 9); none exists yet, so skip.
-        if (item.type === 'file') return;
+        if (item.type === 'file') {
+          // Streamed from disk by the engine; an item with no chosen file is skipped.
+          if (!item.filePath) return;
+          const file = { path: item.filePath, ...(item.fileName ? { fileName: item.fileName } : {}) };
+          parts.push({ name: r(item.key), value: { type: 'file', value: file } });
+          return;
+        }
         parts.push({ name: r(item.key), value: { type: 'text', value: r(item.value) } });
       });
       body = { type: 'multipart', value: parts };

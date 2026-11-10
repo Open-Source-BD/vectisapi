@@ -214,6 +214,15 @@
 .kv-type-select {
   width: 90px;
 }
+/* File cell: a button styled like the input; shows the chosen file name. */
+.kv-file-btn {
+  min-width: 0;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* Body Textarea */
 .body-textarea {

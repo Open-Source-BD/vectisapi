@@ -6,9 +6,8 @@ import type { Collection, EnvVar, Environment, TabState, TreeNode } from '../typ
  * folders mirroring the tree) and back. Stable ids live INSIDE file content,
  * not in filenames, so renames/dupes/illegal chars don't break git history.
  *
- * Lossy by design: formdata `File` bodies cannot be serialized to disk, so they
- * are written as null (the UI surfaces a "file not saved" marker). Round-trip
- * is otherwise lossless.
+ * Form-data file items keep their disk path reference (`filePath`/`fileName`).
+ * Round-trip is lossless.
  */
 
 export interface FileEntry {
@@ -47,10 +46,9 @@ function sanitize(name: string): string {
 
 const pad = (n: number) => String(n).padStart(3, '0');
 
-/** Deep-clone a request, nulling unserializable File bodies. */
+/** Deep-clone a request without its response. */
 function stripFiles(request: TabState): TabState {
   const clone: TabState = JSON.parse(JSON.stringify({ ...request, response: null }));
-  clone.body.formdata = clone.body.formdata.map((item) => (item.type === 'file' ? { ...item, file: null } : item));
   return clone;
 }
 
