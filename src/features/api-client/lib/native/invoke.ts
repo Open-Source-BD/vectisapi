@@ -48,6 +48,11 @@ export async function getResponseBody(id: string, start = 0, end?: number): Prom
   return toBytes(await invoke<RawBytes>('get_response_body', { responseId: id, start, end: end ?? null }));
 }
 
+/** Shows a save dialog and writes the stored body's exact bytes there; the path, or null if cancelled. */
+export function saveResponseBody(id: string, suggestedName?: string): Promise<string | null> {
+  return invoke<string | null>('save_response_body', { responseId: id, suggestedName: suggestedName ?? null });
+}
+
 export function getSettings(): Promise<Settings> {
   return invoke<Settings>('get_settings');
 }

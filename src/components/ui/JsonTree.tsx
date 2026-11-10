@@ -4,6 +4,8 @@ interface JsonTreeProps {
   data: unknown;
   rawText: string;
   query?: string;
+  /** Start with every node expanded (default) or collapsed (large bodies: the tree isn't virtualized). */
+  initiallyOpen?: boolean;
 }
 
 function matches(v: unknown, q: string): boolean {
@@ -23,8 +25,8 @@ function prune(v: unknown, q: string): unknown {
   return out;
 }
 
-export function JsonTree({ data, rawText, query }: JsonTreeProps) {
-  const [defaultOpen, setDefaultOpen] = useState(true);
+export function JsonTree({ data, rawText, query, initiallyOpen = true }: JsonTreeProps) {
+  const [defaultOpen, setDefaultOpen] = useState(initiallyOpen);
   const [version, setVersion] = useState(0);
   const [copied, setCopied] = useState(false);
 

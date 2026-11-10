@@ -343,3 +343,15 @@
 .diff-del {
   background: color-mix(in srgb, var(--md-sys-color-error) 16%, transparent);
 }
+
+/* Truncated (large) body preview notice + inline body errors */
+.body-notice {
+  align-self: center;
+  font-size: 12px;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.body-error {
+  align-self: center;
+  font-size: 12px;
+  color: var(--md-sys-color-error);
+}

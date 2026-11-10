@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { selectActiveTab, useApiStore } from '../../store/useApiStore';
 import { formatSize } from '../../lib/format';
 import { syntaxHighlight } from '../../lib/syntaxHighlight';
@@ -6,7 +6,15 @@ import { generateTypes, TYPE_LANGS, type TypeLang } from '../../lib/jsonToTypes'
 import { parseSetCookie } from '../../lib/cookies';
 import { diffLines, diffStats } from '../../lib/diffLines';
 import { parseJsonBody } from '../../lib/parseJsonBody';
+import { getResponseBody, saveResponseBody } from '../../lib/native/invoke';
+import { decodeText, toNativeError } from '../../lib/native/decodeResponse';
+import type { ResponseData } from '../../types';
 import { CodeView, JsonTree } from '@/components/ui';
+import { VIRTUALIZE_MIN_CHARS } from '@/components/ui/CodeView';
+import { escapeHtml } from '@/components/ui/VirtualLines';
+
+/** Line diff is an O(n*m) table; above this many cells the Diff tab says so instead. */
+const MAX_DIFF_CELLS = 10_000_000;
 
 /** Pretty-print a body for stable diffing (indented JSON when parseable). */
 function prettyBody(rawText: string | undefined): string {
@@ -14,6 +22,35 @@ function prettyBody(rawText: string | undefined): string {
   const v = parseJsonBody(rawText);
   if (v && typeof v === 'object') return JSON.stringify(v, null, 2);
   return rawText;
+}
+
+function lineCount(s: string): number {
+  let n = 1;
+  for (let i = s.indexOf('\n'); i !== -1; i = s.indexOf('\n', i + 1)) n++;
+  return n;
+}
+
+function extensionFor(contentType: string | undefined): string {
+  const ct = (contentType ?? '').toLowerCase();
+  if (ct.includes('json')) return 'json';
+  if (ct.includes('xml')) return 'xml';
+  if (ct.includes('html')) return 'html';
+  if (ct.startsWith('text/')) return 'txt';
+  return 'bin';
+}
+
+/** Save-dialog default: the final URL's last path segment, else `response.<ext from content-type>`. */
+function suggestedFileName(res: ResponseData): string {
+  const ext = extensionFor(res.headers['content-type']);
+  let segment = '';
+  try {
+    const raw = new URL(res.finalUrl ?? '').pathname.split('/').pop() ?? '';
+    segment = decodeURIComponent(raw).replace(/[\\/:*?"<>|]/g, '_').trim();
+  } catch {
+    segment = '';
+  }
+  if (!segment || segment === '.' || segment === '..') return `response.${ext}`;
+  return segment.includes('.') ? segment : `${segment}.${ext}`;
 }
 
 interface ResponsePaneProps {
@@ -26,18 +63,51 @@ interface ResponsePaneProps {
 export function ResponsePane({ onExpand, onCollapse, inModal }: ResponsePaneProps) {
   const tab = useApiStore(selectActiveTab);
   const updateActiveTab = useApiStore((s) => s.updateActiveTab);
+  const setFullResponseBody = useApiStore((s) => s.setFullResponseBody);
   const setResponseModalOpen = useApiStore((s) => s.setResponseModalOpen);
   const res = tab.response;
   const [typeLang, setTypeLang] = useState<TypeLang>('typescript');
   const [bodyView, setBodyView] = useState<'pretty' | 'raw'>('pretty');
   const [bodySearch, setBodySearch] = useState('');
+  /** Keyed by responseId so a pending load / error doesn't leak onto another tab's response. */
+  const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [bodyError, setBodyError] = useState<{ id: string; message: string } | null>(null);
 
   const cookies = parseSetCookie(res?.headers['set-cookie']);
 
-  const parsed = parseJsonBody(res?.rawText);
+  // A truncated body is only a prefix: no parsing / pretty view / highlighting until it is loaded.
+  const truncated = !!res?.truncated;
+  const rawText = res?.rawText;
+  const parsed = useMemo(() => (truncated ? undefined : parseJsonBody(rawText)), [truncated, rawText]);
 
-  const downloadBody = () => {
+  const loadFullBody = async () => {
+    const id = res?.responseId;
+    if (!id) return;
+    const tabId = tab.id;
+    setLoadingId(id);
+    setBodyError(null);
+    try {
+      setFullResponseBody(tabId, id, decodeText(await getResponseBody(id)));
+    } catch (e) {
+      setBodyError({ id, message: toNativeError(e).message });
+    } finally {
+      setLoadingId((cur) => (cur === id ? null : cur));
+    }
+  };
+
+  const downloadBody = async () => {
     if (!res) return;
+    if (res.responseId) {
+      // Native responses: Rust writes the exact stored bytes; null = dialog cancelled.
+      const id = res.responseId;
+      setBodyError(null);
+      try {
+        await saveResponseBody(id, suggestedFileName(res));
+      } catch (e) {
+        setBodyError({ id, message: toNativeError(e).message });
+      }
+      return;
+    }
     const blob = new Blob([res.rawText], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -48,16 +118,30 @@ export function ResponsePane({ onExpand, onCollapse, inModal }: ResponsePaneProp
   };
 
   const isJson = parsed !== undefined && typeof parsed === 'object' && parsed !== null;
-  const prettyText = isJson ? JSON.stringify(parsed, null, 2) : (res?.rawText ?? '');
-  const bodyHtml = isJson
-    ? syntaxHighlight(prettyText)
-    : (res?.rawText ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const prettyText = useMemo(
+    () => (isJson ? JSON.stringify(parsed, null, 2) : (rawText ?? '')),
+    [isJson, parsed, rawText],
+  );
+  const largeBody = prettyText.length > VIRTUALIZE_MIN_CHARS;
 
-  const typesCode = isJson ? generateTypes(parsed, typeLang) : '';
+  const typesCode = useMemo(
+    () => (isJson && tab.activeResTab === 'types' ? generateTypes(parsed, typeLang) : ''),
+    [isJson, parsed, typeLang, tab.activeResTab],
+  );
 
   const prev = tab.prevResponse;
-  const diff = prev && res ? diffLines(prettyBody(prev.rawText), prettyBody(res.rawText)) : [];
+  const prevRaw = prev?.rawText;
+  const diffResult = useMemo(() => {
+    if (prevRaw === undefined || rawText === undefined || tab.activeResTab !== 'diff') return null;
+    const a = prettyBody(prevRaw);
+    const b = truncated ? rawText : prettyText;
+    if (lineCount(a) * lineCount(b) > MAX_DIFF_CELLS) return 'too-large' as const;
+    return diffLines(a, b);
+  }, [prevRaw, rawText, truncated, prettyText, tab.activeResTab]);
+  const diff = Array.isArray(diffResult) ? diffResult : [];
   const diffSummary = diffStats(diff);
+  const error = res?.responseId && bodyError?.id === res.responseId ? bodyError.message : null;
+  const loading = !!res?.responseId && loadingId === res.responseId;
 
   return (
     <section className="response-pane md-surface-container-lowest">
@@ -167,6 +251,19 @@ export function ResponsePane({ onExpand, onCollapse, inModal }: ResponsePaneProp
               style={{ padding: 0, minHeight: 'unset' }}
             >
               <div className="types-bar">
+                {truncated && (
+                  <>
+                    <span className="body-notice">Preview only — showing the start of a {formatSize(res.size)} body.</span>
+                    <button className="types-lang-btn" onClick={loadFullBody} disabled={loading}>
+                      {loading ? 'Loading…' : `Load full body (${formatSize(res.size)})`}
+                    </button>
+                  </>
+                )}
+                {error && (
+                  <span className="body-error" role="alert">
+                    {error}
+                  </span>
+                )}
                 {isJson && (
                   <>
                     <button
@@ -200,9 +297,16 @@ export function ResponsePane({ onExpand, onCollapse, inModal }: ResponsePaneProp
                 </button>
               </div>
               {isJson && bodyView === 'pretty' ? (
-                <JsonTree data={parsed} rawText={prettyText} query={bodySearch} />
+                <JsonTree
+                  // Remount when crossing the size line so a large body never inherits "expanded".
+                  key={largeBody ? 'large' : 'small'}
+                  data={parsed}
+                  rawText={prettyText}
+                  query={bodySearch}
+                  initiallyOpen={!largeBody}
+                />
               ) : (
-                <CodeView text={prettyText} html={isJson ? syntaxHighlight(prettyText) : bodyHtml} wrap />
+                <CodeView text={prettyText} highlight={isJson ? syntaxHighlight : escapeHtml} wrap />
               )}
             </div>
 
@@ -324,7 +428,11 @@ export function ResponsePane({ onExpand, onCollapse, inModal }: ResponsePaneProp
                     <span className="diff-del-count">-{diffSummary.removed}</span>
                   </span>
                 </div>
-                {diffSummary.added === 0 && diffSummary.removed === 0 ? (
+                {diffResult === 'too-large' ? (
+                  <div className="empty-state" style={{ padding: '32px' }}>
+                    <span>Bodies are too large to diff line by line.</span>
+                  </div>
+                ) : diffSummary.added === 0 && diffSummary.removed === 0 ? (
                   <div className="empty-state" style={{ padding: '32px' }}>
                     <span className="material-symbols-outlined" style={{ fontSize: '40px', opacity: 0.5 }}>
                       check

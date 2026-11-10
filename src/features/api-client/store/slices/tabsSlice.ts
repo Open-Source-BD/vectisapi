@@ -62,6 +62,8 @@ export interface TabsSlice {
   cancelCloseTab: () => void;
   setActiveTab: (id: string) => void;
   updateActiveTab: (updates: Partial<TabState>) => void;
+  /** Swap a truncated response's preview for its full body (no-op if that tab moved on to another response). */
+  setFullResponseBody: (tabId: string, responseId: string, rawText: string) => void;
 
   // Realtime
   setTabProtocol: (protocol: Protocol) => void;
@@ -146,6 +148,15 @@ export const createTabsSlice: StateCreator<StoreState, [], [], TabsSlice> = (set
   updateActiveTab: (updates) =>
     set((s) => ({
       tabs: s.tabs.map((t) => (t.id === s.activeTabId ? { ...t, ...updates } : t)),
+    })),
+
+  setFullResponseBody: (tabId, responseId, rawText) =>
+    set((s) => ({
+      tabs: s.tabs.map((t) =>
+        t.id === tabId && t.response?.responseId === responseId
+          ? { ...t, response: { ...t.response, rawText, truncated: false } }
+          : t,
+      ),
     })),
 
   // --- Realtime ---

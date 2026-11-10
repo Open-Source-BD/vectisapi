@@ -5,3 +5,4 @@ export { KvEditor } from './KvEditor';
 export { PaneResizer } from './PaneResizer';
 export type { EditorLang } from './editorKeys';
 export { WindowedList } from './WindowedList';
+export { VirtualLines } from './VirtualLines';
