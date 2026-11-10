@@ -1,0 +1,85 @@
+/* Workspace status chip (git-native storage) */
+.ws-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 17px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  background: var(--md-sys-color-surface-container-high);
+  color: var(--md-sys-color-on-surface);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ws-chip:hover:not(:disabled) {
+  background: var(--md-sys-color-surface-container-highest);
+}
+.ws-chip:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.ws-chip.ws-muted {
+  cursor: default;
+  opacity: 0.7;
+}
+.ws-chip.ws-connected {
+  border-color: var(--success);
+}
+.ws-chip.ws-reconnect {
+  border-color: #b8860b;
+  color: #b8860b;
+  background: color-mix(in srgb, #b8860b 12%, transparent);
+}
+.ws-chip-wrap {
+  position: relative;
+  display: inline-block;
+}
+.ws-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 50;
+  min-width: 180px;
+  padding: 4px;
+  background: var(--md-sys-color-surface-container-high);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  display: flex;
+  flex-direction: column;
+}
+.ws-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--md-sys-color-on-surface);
+  border-radius: 6px;
+  text-align: left;
+}
+.ws-menu button:hover {
+  background: var(--md-sys-color-surface-container-highest);
+}
+.ws-menu .ws-menu-danger {
+  color: var(--md-sys-color-error);
+}
+
+/* form-data file body: not-saved-to-disk notice */
+.body-file-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--md-sys-color-on-surface-variant);
+  background: color-mix(in srgb, var(--md-sys-color-on-surface-variant) 10%, transparent);
+}

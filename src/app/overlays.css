@@ -1,0 +1,503 @@
+/* Environments modal */
+.env-modal-body {
+  display: flex;
+  gap: 16px;
+}
+.env-list {
+  width: 220px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-right: 1px solid var(--md-sys-color-outline-variant);
+  padding-right: 12px;
+  max-height: 52vh;
+  overflow-y: auto;
+}
+.env-list-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: none;
+  background: none;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  color: var(--md-sys-color-on-surface);
+  font-size: 13px;
+}
+.env-list-item:hover {
+  background: var(--md-sys-color-surface-container-high);
+}
+.env-list-item.selected {
+  background: rgba(0, 97, 164, 0.12);
+  font-weight: 600;
+}
+.env-list-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.env-new {
+  display: flex;
+  gap: 4px;
+  margin-top: 8px;
+}
+.env-detail {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.env-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Bot-wall challenge panel */
+.challenge-panel {
+  padding: 32px 24px;
+  text-align: center;
+}
+.challenge-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface);
+}
+.challenge-msg {
+  max-width: 46ch;
+  margin: 0;
+  line-height: 1.5;
+}
+.challenge-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.challenge-error {
+  max-width: 46ch;
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--md-sys-color-error);
+}
+.challenge-panel .md-filled-btn,
+.challenge-panel .md-text-btn {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.material-symbols-outlined.spin {
+  animation: rt-spin 0.9s linear infinite;
+}
+@keyframes rt-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Collection Runner */
+.md-modal.runner-modal {
+  width: 640px;
+  max-width: 94vw;
+}
+.runner-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.runner-config {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.runner-target {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+  flex: 1;
+  min-width: 0;
+}
+.runner-target-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.runner-target-count {
+  font-size: 12px;
+  color: var(--md-sys-color-on-surface-variant);
+  background: var(--md-sys-color-surface-container-high);
+  padding: 1px 8px;
+  border-radius: 10px;
+  flex: none;
+}
+.runner-iter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.runner-data-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.runner-run,
+.runner-cancel {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: none;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.runner-run {
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
+}
+.runner-run:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.runner-cancel {
+  background: var(--md-sys-color-error);
+  color: var(--md-sys-color-on-error, #fff);
+}
+.runner-data {
+  width: 100%;
+  font-family: var(--mono-font);
+  font-size: 12px;
+  resize: vertical;
+}
+.runner-error {
+  background: color-mix(in srgb, var(--md-sys-color-error) 12%, transparent);
+  color: var(--md-sys-color-error);
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+.runner-progress-track {
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--md-sys-color-surface-container-high);
+}
+.runner-progress-bar {
+  height: 100%;
+  background: var(--md-sys-color-primary);
+  transition: width 0.15s ease;
+}
+.runner-progress-label {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.runner-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+}
+.runner-summary.all-pass {
+  border-color: var(--success);
+}
+.runner-summary.has-fail {
+  border-color: var(--md-sys-color-error);
+}
+.runner-summary-time {
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 12px;
+}
+.runner-report {
+  display: flex;
+  flex-direction: column;
+  max-height: 42vh;
+  overflow-y: auto;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: 8px;
+}
+.runner-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.runner-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant);
+}
+.runner-row:last-child {
+  border-bottom: none;
+}
+.runner-row-icon {
+  font-size: 18px;
+  flex: none;
+}
+.runner-row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.runner-row-iter {
+  font-size: 11px;
+  color: var(--md-sys-color-on-surface-variant);
+  flex: none;
+}
+.runner-row-status,
+.runner-row-time,
+.runner-row-tests {
+  font-family: var(--mono-font);
+  font-size: 12px;
+  color: var(--md-sys-color-on-surface-variant);
+  flex: none;
+}
+.runner-row-error {
+  flex-basis: 100%;
+  font-size: 11px;
+  color: var(--md-sys-color-error);
+  font-family: var(--mono-font);
+  padding-left: 26px;
+}
+
+/* Command palette (Cmd/Ctrl-K) */
+.cmdk-overlay {
+  align-items: flex-start;
+  padding-top: 12vh;
+}
+.cmdk {
+  width: 600px;
+  max-width: 92vw;
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--md-sys-color-surface-container-high);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
+  overflow: hidden;
+}
+.cmdk-input {
+  height: 52px;
+  padding: 0 18px;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--md-sys-color-on-surface);
+  font-size: 16px;
+  font-family: var(--font-family);
+  border-bottom: 1px solid var(--md-sys-color-outline-variant);
+}
+.cmdk-list {
+  overflow-y: auto;
+  padding: 6px;
+}
+.cmdk-empty {
+  padding: 20px;
+  text-align: center;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 14px;
+}
+.cmdk-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  border-radius: 8px;
+  text-align: left;
+  color: var(--md-sys-color-on-surface);
+  font-size: 14px;
+}
+.cmdk-row.active {
+  background: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
+}
+.cmdk-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cmdk-hint {
+  flex: none;
+  font-size: 12px;
+  opacity: 0.7;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Cookies manager */
+.cookies-intro {
+  font-size: 13px;
+  color: var(--md-sys-color-on-surface-variant);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.cookies-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 14px;
+}
+.cookies-domain {
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: 8px;
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+.cookies-domain-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 6px 6px 12px;
+  background: var(--md-sys-color-surface-container-high);
+}
+.cookies-host {
+  font-weight: 500;
+  font-size: 13px;
+}
+.cookies-row {
+  display: flex;
+  gap: 10px;
+  padding: 6px 12px;
+  font-family: var(--mono-font);
+  font-size: 12px;
+  border-top: 1px solid var(--md-sys-color-outline-variant);
+}
+.cookies-name {
+  color: var(--md-sys-color-primary);
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cookies-value {
+  color: var(--md-sys-color-on-surface-variant);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* {{var}} autocomplete */
+.var-input-wrap {
+  position: relative;
+  flex: 1;
+  display: flex;
+}
+.var-suggest {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  z-index: 60;
+  min-width: 220px;
+  max-width: 360px;
+  max-height: 220px;
+  overflow-y: auto;
+  background: var(--md-sys-color-surface-container-high);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+  padding: 4px;
+}
+.var-suggest-row {
+  display: flex;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  border-radius: 6px;
+  text-align: left;
+  font-family: var(--mono-font);
+  font-size: 13px;
+  color: var(--md-sys-color-on-surface);
+}
+.var-suggest-row.active {
+  background: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
+}
+.var-suggest-name {
+  color: var(--md-sys-color-primary);
+}
+.var-suggest-row.active .var-suggest-name {
+  color: var(--md-sys-color-on-primary-container);
+}
+
+/* {{var}} colored token overlay (VarInput) */
+.var-input-field {
+  position: relative;
+  z-index: 1;
+  background: transparent !important;
+  color: transparent !important;
+  caret-color: var(--md-sys-color-on-surface);
+}
+.var-input-field:focus {
+  border-width: 1px !important;
+  padding: 0 16px !important;
+  border-color: var(--md-sys-color-primary);
+}
+.var-input-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  display: flex;
+  align-items: center;
+  white-space: pre;
+  overflow: hidden;
+  pointer-events: none;
+  color: var(--md-sys-color-on-surface);
+  border-color: transparent !important;
+}
+.tok-var {
+  color: var(--md-sys-color-primary);
+  background: color-mix(in srgb, var(--md-sys-color-primary) 16%, transparent);
+  border-radius: 3px;
+  padding: 1px 0;
+}
+
+/* Env var copy/move picker */
+.env-var-move {
+  flex: none;
+  width: 44px;
+  height: 40px;
+  padding: 0 4px;
+  font-size: 14px;
+  color: var(--md-sys-color-on-surface-variant);
+  cursor: pointer;
+}
+.env-var-move:hover {
+  color: var(--md-sys-color-primary);
+  border-color: var(--md-sys-color-primary);
+}

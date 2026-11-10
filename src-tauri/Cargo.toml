@@ -1,0 +1,17 @@
+[package]
+name = "vectisapi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "VectisAPI - offline desktop API client"
+
+[lib]
+name = "vectisapi_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+vectis-core = { path = "../crates/vectis-core" }

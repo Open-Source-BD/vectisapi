@@ -1,0 +1,74 @@
+/* Base resets */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--md-sys-color-background);
+  color: var(--md-sys-color-on-background);
+  font-family: var(--font-family);
+  height: 100vh;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  display: flex;
+  height: 100vh;
+}
+
+/* Material Icons Alignment */
+.material-symbols-outlined {
+  font-size: 20px;
+  vertical-align: middle;
+}
+
+/* Shared Material Surface Classes */
+.md-surface {
+  background-color: var(--md-sys-color-surface);
+}
+.md-surface-container-lowest {
+  background-color: var(--md-sys-color-surface-container-lowest);
+}
+.md-surface-container-low {
+  background-color: var(--md-sys-color-surface-container-low);
+}
+.md-surface-container {
+  background-color: var(--md-sys-color-surface-container);
+}
+.md-surface-container-high {
+  background-color: var(--md-sys-color-surface-container-high);
+}
+
+/* Empty State */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  inset: 0;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 14px;
+  gap: 16px;
+  background-color: var(--md-sys-color-surface-container-lowest);
+  z-index: 10;
+}
+.empty-state.hidden {
+  display: none;
+}
+
+/* Sidebar empty state (in-flow, NOT a full-cover overlay like .empty-state) */
+.sidebar-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 13px;
+}

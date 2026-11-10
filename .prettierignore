@@ -1,0 +1,7 @@
+dist/
+target/
+node_modules/
+src-tauri/gen/
+package-lock.json
+docs/
+.superpowers/

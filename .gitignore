@@ -1,0 +1,12 @@
+/node_modules
+/dist
+/target
+/coverage
+/playwright-report/
+/test-results/
+.DS_Store
+*.pem
+npm-debug.log*
+.env*
+*.tsbuildinfo
+/src-tauri/gen/schemas
