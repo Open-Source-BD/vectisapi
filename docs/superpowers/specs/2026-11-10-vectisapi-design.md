@@ -1,4 +1,4 @@
-# Dakghor — offline desktop API client (design)
+# VectisAPI — offline desktop API client (design)
 
 Date: 2026-11-10
 Status: draft for approval
@@ -22,7 +22,6 @@ The user's explicit requirements:
 3. **Offline**, data stored in an **internal database** (not files in a folder).
 4. The user delegated all other choices: "choose the best options, research when unsure."
 
-"Dakghor" (ডাকঘর, "post office" in Bangla) is a working name; renaming is cheap.
 
 ## 2. Goals
 
@@ -106,13 +105,13 @@ Browser-only plumbing that goes away: `app/api/proxy`, `app/api/stream`, `proxyC
   - "Retry from browser" / bot-wall UI removed (no longer reachable).
   - Response meta gains a hover popover with timing breakdown (6.3).
   - Everything else pixel-identical. Verify with side-by-side screenshots of the same states
-    (next-postman `npm run dev` vs Dakghor) for: empty state, request+JSON response, collections tree,
+    (next-postman `npm run dev` vs VectisAPI) for: empty state, request+JSON response, collections tree,
     env modal, runner modal, realtime pane, dark mode.
 
 ### 6.2 Rust core layout
 
 Cargo workspace:
-- `crates/dakghor-core` — pure Rust, no Tauri: HTTP engine, WS/SSE, cookie jar, storage, search.
+- `crates/vectis-core` — pure Rust, no Tauri: HTTP engine, WS/SSE, cookie jar, storage, search.
   Fully unit/integration-testable with `cargo test`.
 - `src-tauri` — thin Tauri layer: commands, channels, state wiring, window setup.
 
@@ -151,7 +150,7 @@ refused, DNS failed, timeout, reset, TLS, invalid URL...).
   behavior). *(Builder-check decision.)*
 - Settings honored per request: timeout (default 30 s, 0 = none), follow redirects (default on,
   max 10), verify TLS (default on), HTTP proxy URL (none by default; also honor system env proxies
-  off by default), default User-Agent `Dakghor/<version>` unless user sets one.
+  off by default), default User-Agent `VectisAPI/<version>` unless user sets one.
 
 ### 6.4 Realtime
 
@@ -168,7 +167,7 @@ refused, DNS failed, timeout, reset, TLS, invalid URL...).
 
 - **SQLite via `rusqlite`** (bundled SQLite, features `bundled`, FTS5). Chosen over sqlx (async
   overhead, macros, no benefit for a single local file), redb (key-value, no FTS/queries), and Turso
-  (beta). One DB file in the OS app-data dir (`dakghor.db`), WAL mode, `synchronous=NORMAL`,
+  (beta). One DB file in the OS app-data dir (`vectisapi.db`), WAL mode, `synchronous=NORMAL`,
   dedicated DB thread owning the connection (commands send jobs over a channel), so the UI never
   blocks on I/O.
 - Schema (JSON documents + indexed columns; schema version table + forward-only migrations):
@@ -230,7 +229,7 @@ history limit, theme. Plus "Backup: export all / import all" and "Open data fold
 
 ### 6.10 Relationship to next-postman
 
-Dakghor is a **one-time fork**: copy next-postman's frontend at `ae84135`, then refactor freely
+VectisAPI is a **one-time fork**: copy next-postman's frontend at `ae84135`, then refactor freely
 (ordered headers, partial response bodies, Rust-backed cookies, etc.). No obligation to stay
 mergeable with upstream. Keep `lib/` modules intact where they need no change, simply to reduce work.
 *(Builder-check decision.)*
@@ -238,7 +237,7 @@ mergeable with upstream. Keep `lib/` modules intact where they need no change, s
 ## 7. Left to the builder
 
 - Exact crate minor versions (pin latest stable at implementation time; verify on crates.io).
-- Internal module boundaries inside `dakghor-core`, command naming.
+- Internal module boundaries inside `vectis-core`, command naming.
 - Whether to port `parseSse` to Rust or keep TS parser fed with raw chunks (prefer Rust).
 - DNS/connect/TLS timing breakdown (stretch).
 - Virtualization library choice for text/log views (or hand-rolled), as long as visuals don't change.
