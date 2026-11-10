@@ -313,6 +313,51 @@ async fn authorization_dropped_on_cross_host_redirect() {
 }
 
 #[tokio::test]
+async fn explicit_cookie_not_sent_cross_origin() {
+    let base = server::spawn().await; // http://127.0.0.1:port
+    let other_origin = base.replace("127.0.0.1", "localhost");
+    let (engine, _) = setup_with_jar();
+    let mut s = spec(
+        "GET",
+        format!("{base}/redirect-to?to={other_origin}/echo-headers"),
+    );
+    s.headers = vec![h("Cookie", "session=secret"), h("X-Keep", "1")];
+    let (meta, body) = engine.send(s).await.unwrap();
+    assert_eq!(meta.final_url, format!("{other_origin}/echo-headers"));
+    assert!(echoed(&body, "cookie").is_empty());
+    assert_eq!(echoed(&body, "x-keep"), vec!["1"]);
+}
+
+#[tokio::test]
+async fn explicit_cookie_kept_same_origin_redirect() {
+    let base = server::spawn().await;
+    let (engine, jar) = setup_with_jar();
+    jar.store_response(&format!("{base}/").parse().unwrap(), &["jar=1".to_string()]);
+    let mut s = spec("GET", format!("{base}/redirect-to?to=/echo-headers"));
+    s.headers = vec![h("Cookie", "session=secret")];
+    let (_, body) = engine.send(s).await.unwrap();
+    assert_eq!(echoed(&body, "cookie"), vec!["session=secret"]);
+}
+
+#[tokio::test]
+async fn jar_resumes_after_cross_origin_hop() {
+    let base = server::spawn().await;
+    let other_origin = base.replace("127.0.0.1", "localhost");
+    let (engine, jar) = setup_with_jar();
+    jar.store_response(
+        &format!("{other_origin}/").parse().unwrap(),
+        &["jar=1".to_string()],
+    );
+    let mut s = spec(
+        "GET",
+        format!("{base}/redirect-to?to={other_origin}/echo-headers"),
+    );
+    s.headers = vec![h("Cookie", "session=secret")];
+    let (_, body) = engine.send(s).await.unwrap();
+    assert_eq!(echoed(&body, "cookie"), vec!["jar=1"]);
+}
+
+#[tokio::test]
 async fn redirect_method_and_body_rules() {
     let base = server::spawn().await;
     let (engine, _) = setup_with_jar();

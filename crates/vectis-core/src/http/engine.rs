@@ -155,9 +155,10 @@ pub(crate) enum HopTimeout {
 }
 
 /// Sends a request, following redirects when settings say so: the jar's cookies are attached on
-/// every hop unless `headers` has its own `Cookie`, every hop's `Set-Cookie` is stored, headers
-/// that must not cross hosts are stripped, and 301/302/303 turn other methods into a body-less
-/// GET (307/308 keep method and body). Returns the final response.
+/// every hop that carries no user `Cookie` header, every hop's `Set-Cookie` is stored, headers
+/// that must not cross origins are stripped (after which the jar takes over), and 301/302/303
+/// turn other methods into a body-less GET (307/308 keep method and body). Also used by SSE.
+/// Returns the final response.
 pub(crate) async fn send_following_redirects(
     pool: &ClientPool,
     jar: &CookieJar,
@@ -167,8 +168,6 @@ pub(crate) async fn send_following_redirects(
     body: &BodySpec,
     timeout: HopTimeout,
 ) -> Result<reqwest::Response, CoreError> {
-    // An explicit Cookie header is sent on every hop and the jar stays out of it.
-    let use_jar = !headers.contains_key(COOKIE);
     let no_body = BodySpec::None;
     let mut body = body;
     let client = pool.client();
@@ -178,7 +177,8 @@ pub(crate) async fn send_following_redirects(
 
     loop {
         let mut hop_headers = headers.clone();
-        if use_jar {
+        // A user Cookie header replaces the jar until a cross-origin hop strips it.
+        if !headers.contains_key(COOKIE) {
             if let Some(cookie) = jar.header_for(&url) {
                 if let Ok(value) = HeaderValue::from_str(&cookie) {
                     hop_headers.append(COOKIE, value);
@@ -275,17 +275,16 @@ fn redirect_target(response: &reqwest::Response, current: &Url) -> Option<Url> {
     matches!(next.scheme(), "http" | "https").then_some(next)
 }
 
-/// Removes headers that must not follow a redirect from `prev` to `next`: `Authorization` when
-/// the host changes or https downgrades to http (no token leaks; curl and browsers do the same),
-/// and a user-set `Host` when the host changes. `Proxy-Authorization` targets the proxy and stays.
+/// Removes headers that must not follow a redirect from `prev` to a different origin `next`
+/// (scheme, host or port changed — Fetch and curl CVE-2022-27776 semantics; an https→http
+/// downgrade is always cross-origin): the user's `Authorization`, `Cookie` and `Host`. With the
+/// user `Cookie` gone, the jar supplies cookies for the new origin. `Proxy-Authorization`
+/// targets the proxy and stays.
 fn strip_on_hop(prev: &Url, next: &Url, headers: &mut HeaderMap) {
-    let host_changed = prev.host_str() != next.host_str();
-    let downgraded = prev.scheme() == "https" && next.scheme() == "http";
-    if host_changed || downgraded {
-        headers.remove(AUTHORIZATION);
-    }
-    if host_changed {
-        headers.remove(HOST);
+    if prev.origin() != next.origin() {
+        for name in [AUTHORIZATION, COOKIE, HOST] {
+            headers.remove(name);
+        }
     }
 }
 
@@ -436,6 +435,7 @@ mod tests {
     fn hop(prev: &str, next: &str) -> HeaderMap {
         let mut headers = HeaderMap::new();
         headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer t"));
+        headers.insert(COOKIE, HeaderValue::from_static("mine=1"));
         headers.insert(HOST, HeaderValue::from_static("api.example.com"));
         headers.insert(PROXY_AUTHORIZATION, HeaderValue::from_static("Basic p"));
         headers.insert("x-keep", HeaderValue::from_static("1"));
@@ -447,36 +447,58 @@ mod tests {
         headers
     }
 
+    fn assert_stripped(prev: &str, next: &str) {
+        let h = hop(prev, next);
+        for name in [AUTHORIZATION, COOKIE, HOST] {
+            assert!(!h.contains_key(&name), "{name} kept: {prev} -> {next}");
+        }
+        assert!(h.contains_key(PROXY_AUTHORIZATION), "{prev} -> {next}");
+        assert!(h.contains_key("x-keep"), "{prev} -> {next}");
+    }
+
     #[test]
     fn strip_on_hop_host_change() {
-        let h = hop("https://api.example.com/a", "https://evil.test/b");
-        assert!(!h.contains_key(AUTHORIZATION));
-        assert!(!h.contains_key(HOST));
-        assert!(h.contains_key(PROXY_AUTHORIZATION));
-        assert!(h.contains_key("x-keep"));
+        assert_stripped("https://api.example.com/a", "https://evil.test/b");
     }
 
     #[test]
     fn strip_on_hop_https_to_http_downgrade() {
-        let h = hop("https://api.example.com/a", "http://api.example.com/b");
-        assert!(!h.contains_key(AUTHORIZATION));
-        assert!(h.contains_key(HOST));
-        assert!(h.contains_key(PROXY_AUTHORIZATION));
+        assert_stripped("https://api.example.com/a", "http://api.example.com/b");
     }
 
     #[test]
-    fn strip_on_hop_same_origin_and_upgrade_keep() {
+    fn strip_on_hop_port_change() {
+        assert_stripped(
+            "http://api.example.com:8080/a",
+            "http://api.example.com:9090/b",
+        );
+        assert_stripped(
+            "https://api.example.com/a",
+            "https://api.example.com:8443/b",
+        );
+    }
+
+    #[test]
+    fn strip_on_hop_scheme_upgrade_is_cross_origin() {
+        // http:80 → https:443 on the same host is still a different origin.
+        assert_stripped("http://api.example.com/a", "https://api.example.com/b");
+    }
+
+    #[test]
+    fn strip_on_hop_same_origin_keeps() {
         for (prev, next) in [
-            ("https://api.example.com/a", "https://api.example.com/b"),
-            ("http://api.example.com/a", "https://api.example.com/b"),
+            ("https://api.example.com/a", "https://api.example.com/b?x=1"),
+            // Explicit default port is the same origin.
+            ("https://api.example.com/a", "https://api.example.com:443/b"),
             (
                 "http://api.example.com:8080/a",
-                "http://api.example.com:9090/b",
+                "http://api.example.com:8080/b",
             ),
         ] {
             let h = hop(prev, next);
-            assert!(h.contains_key(AUTHORIZATION), "{prev} -> {next}");
-            assert!(h.contains_key(HOST), "{prev} -> {next}");
+            for name in [AUTHORIZATION, COOKIE, HOST, PROXY_AUTHORIZATION] {
+                assert!(h.contains_key(&name), "{name} dropped: {prev} -> {next}");
+            }
         }
     }
 }
