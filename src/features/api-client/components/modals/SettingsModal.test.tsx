@@ -181,6 +181,14 @@ describe('Settings chip and modal', () => {
     expect(useApiStore.getState().isSettingsModalOpen).toBe(false);
   });
 
+  it('proxy field notes that WebSocket does not use the proxy', async () => {
+    open();
+    await act(async () => {});
+    expect($('#set-proxy-note')?.textContent).toBe(
+      "Applies to HTTP and SSE. WebSocket connections don't use the proxy yet.",
+    );
+  });
+
   it('history limit clamps to 50–10000 (and store cap to 64–4096 MB)', async () => {
     open();
     type('#set-history', '5');

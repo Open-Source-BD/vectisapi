@@ -48,4 +48,18 @@ describe('KvEditor file cell', () => {
     await act(async () => (host.querySelector('.kv-file-btn') as HTMLButtonElement).click());
     expect(onChange).not.toHaveBeenCalled();
   });
+
+  it('picker failure is caught and logged, nothing changes', async () => {
+    const error = new Error('dialog unavailable');
+    vi.mocked(pickFile).mockRejectedValue(error);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const onChange = vi.fn();
+    act(() =>
+      root.render(<KvEditor items={[{ id: '1', key: 'f', value: '', type: 'file' }]} onChange={onChange} allowFile />),
+    );
+    await act(async () => (host.querySelector('.kv-file-btn') as HTMLButtonElement).click());
+    expect(onChange).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith('File picker failed:', error);
+    warn.mockRestore();
+  });
 });

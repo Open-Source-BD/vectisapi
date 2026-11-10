@@ -52,8 +52,12 @@ export function KvEditor({ items, onChange, allowFile = false, renderRowExtra }:
               className="md-input kv-input kv-file-btn"
               title={item.filePath}
               onClick={async () => {
-                const picked = await pickFile();
-                if (picked) patch(idx, { filePath: picked.path, fileName: picked.name });
+                try {
+                  const picked = await pickFile();
+                  if (picked) patch(idx, { filePath: picked.path, fileName: picked.name });
+                } catch (e) {
+                  console.warn('File picker failed:', e);
+                }
               }}
             >
               {item.fileName || 'Choose file'}

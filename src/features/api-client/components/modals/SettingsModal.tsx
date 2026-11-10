@@ -219,8 +219,15 @@ function SettingsModalInner({ initial }: { initial: Settings }) {
             value={proxyUrl}
             aria-invalid={!proxyOk}
             onChange={(e) => setProxyUrl(e.target.value)}
-            style={{ width: '100%', marginBottom: '16px' }}
+            style={{ width: '100%', marginBottom: '4px' }}
           />
+          <div
+            id="set-proxy-note"
+            role="note"
+            style={{ color: 'var(--md-sys-color-on-surface-variant)', fontSize: '12px', marginBottom: '16px' }}
+          >
+            Applies to HTTP and SSE. WebSocket connections don't use the proxy yet.
+          </div>
 
           <label className="modal-label" htmlFor="set-ua">
             Default User-Agent
