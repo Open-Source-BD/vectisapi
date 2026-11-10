@@ -62,3 +62,34 @@ jobs:
             playwright-report/
             test-results/
           retention-days: 7
+
+  # Rust and Vitest suites on the other desktop platforms (e2e stays on the Linux job above).
+  test-matrix:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: npm ci
+
+      # tauri::generate_context! embeds ../dist at compile time, so build the frontend first.
+      - name: Build frontend
+        run: npm run build
+
+      - name: cargo test
+        run: cargo test --workspace
+
+      - name: vitest
+        run: npm test

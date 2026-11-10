@@ -5,12 +5,23 @@ the CSP are covered by `cargo test`, Vitest and Playwright). Run on a release bu
 (`npm run tauri build`, then open `target/release/bundle/macos/VectisAPI.app`, the `.msi`/`.exe`,
 or the AppImage/`.deb`) unless a step says `tauri dev`.
 
-Record date, OS, build and pass/fail per item.
+Record date, OS, build and pass/fail per item in the Results table below (one row per platform
+run). Sections marked **RELEASE GATE** must pass on every platform before a release is tagged.
+
+## Results
+
+| Platform (OS / webview version) | Date | Tester | Build | §1 Persist on close (GATE) | §2 Newer DB | §3 Dialogs | §4 Realtime | §5 Large body | §6 CSP scripts (GATE) | §7 Other platforms | §8 Startup/idle | §9 Modal blur |
+| ------------------------------- | ---- | ------ | ----- | -------------------------- | ----------- | ---------- | ----------- | ------------- | --------------------- | ------------------ | --------------- | ------------- |
+| macOS                           |      |        |       |                            |             |            |             |               |                       |                    |                 |               |
+| Windows                         |      |        |       |                            |             |            |             |               |                       |                    |                 |               |
+| Linux                           |      |        |       |                            |             |            |             |               |                       |                    |                 |               |
 
 Data folder (for "delete the database" steps): macOS `~/Library/Application Support/dev.vectisapi.app/`,
 Windows `%APPDATA%\dev.vectisapi.app\`, Linux `~/.local/share/dev.vectisapi.app/`.
 
-## 1. Persistence on close
+## 1. Persistence on close — RELEASE GATE
+
+The window-close / quit flush (1a–1c, including Cmd+Q) is only verifiable in the real app.
 
 **1a. Window close flushes edits**
 1. Launch. In the active tab type the URL `https://example.test/flush-close-1`.
@@ -36,7 +47,8 @@ Expected: `smoke` = `1` is there.
 ## 2. Startup error dialog with a newer-schema database
 
 1. Quit the app. Back up `vectisapi.db` (copy it elsewhere).
-2. Run `sqlite3 vectisapi.db "PRAGMA user_version = 999;"` in the data folder.
+2. Run `sqlite3 vectisapi.db "INSERT INTO schema_version (version) VALUES (999);"` in the data
+   folder (the app reads `MAX(version)` from its `schema_version` table).
 3. Launch.
 
 Expected: no main window; a native error dialog "VectisAPI could not open its database and will
@@ -112,7 +124,9 @@ arrives. Scroll top-to-bottom quickly: no blank flashes longer than a frame, no 
 3. **Load full body**: a short hitch (≲0.5 s) is acceptable; afterwards scrolling to the very end is
    smooth and the last line is the end of the JSON. Download writes the exact 50 MB.
 
-## 6. Scripts in the real webview (CSP)
+## 6. Scripts in the real webview (CSP) — RELEASE GATE
+
+Worker script evaluation under the production CSP is only verifiable in the real webview.
 
 1. Scripts tab: `pm.environment.set("seg", "ok");` URL `https://httpbin.org/anything/{{seg}}` → Send.
 2. Tests tab: `pm.test("status", () => pm.expect(pm.response.code).to.eql(200));` → Send.

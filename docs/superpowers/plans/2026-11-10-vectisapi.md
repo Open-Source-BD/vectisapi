@@ -34,7 +34,7 @@
 1. **Binary / non-UTF-8 bodies** (images, protobuf, gzip served without Content-Encoding): UI shows lossy text with correct `size`, Download writes the exact bytes. → Task 3 test `binary_body_roundtrip_exact_bytes`.
 2. **Unresolved `{{var}}` or garbage URL** (`{{base}}/x`, `http://`, spaces): a clean `invalid_url` error in the response pane, never a panic or hung spinner. → Task 2 test `invalid_url_is_error_kind`, Task 8 test `unresolved var url yields error response`.
 3. **Endless / huge body on an HTTP tab** (server streams forever, or a 2 GB file): user Cancel works mid-body; a body exceeding the store cap aborts with `body_too_large` instead of eating RAM. → Task 3 test `body_over_cap_errors`, Task 2 test `cancel_mid_body`.
-4. **App quit or crash right after an edit**: the edit survives a normal quit (flush) and at most 300 ms of edits are lost on a crash; a corrupted/older DB never bricks startup. → Task 5 test `reopen_after_write_persists`, Task 10 test `flush on close writes pending entities`.
+4. **App quit or crash right after an edit**: the edit survives a normal quit (flush) and at most ~1 s of edits (debounce 300 ms, max-wait 1 s) are lost on a crash; a corrupted/older DB never bricks startup. → Task 5 test `reopen_after_write_persists`, Task 10 test `flush on close writes pending entities`.
 5. **Duplicate response headers** (multiple `Set-Cookie`, `Link`, `Vary`): all values kept in order in `headerList`; the legacy `headers` record joins values with `, ` (and `\n` for set-cookie) so the Headers tab shows every value. → Task 2 test `duplicate_response_headers_preserved`.
 
 ---
