@@ -220,6 +220,7 @@ fn router(state: ServerState) -> Router {
         .route("/ws/binary", get(ws_binary))
         .route("/ws/close", get(ws_close))
         .route("/ws/tick", get(ws_tick))
+        .route("/ws/ua", get(ws_user_agent))
         .route("/sse/events", get(sse_events))
         .route("/sse/missing", get(sse_missing))
         .route("/sse/endless", get(sse_endless))
@@ -293,6 +294,15 @@ async fn ws_echo(
                 }
             }
         })
+}
+
+/// Greets with the request's User-Agent.
+async fn ws_user_agent(ws: WebSocketUpgrade, headers: HeaderMap) -> Response {
+    let ua = header_str(&headers, "user-agent");
+    ws.on_upgrade(move |mut socket: WebSocket| async move {
+        let _ = socket.send(Message::Text(ua.into())).await;
+        while let Some(Ok(_)) = socket.recv().await {}
+    })
 }
 
 async fn ws_binary(ws: WebSocketUpgrade) -> Response {
@@ -563,6 +573,46 @@ async fn ws_invalid_url_is_error() {
     assert!(events.lock().is_empty());
 }
 
+/// First message received on `/ws/ua` with the given registry and request headers.
+async fn ws_seen_user_agent(rt: &RtRegistry, addr: &str, headers: Vec<(String, String)>) -> String {
+    let (events, sink) = collector();
+    rt.open_ws(
+        "ua".into(),
+        format!("ws://{addr}/ws/ua"),
+        headers,
+        vec![],
+        sink,
+    )
+    .await
+    .unwrap();
+    wait_for(&events, "user agent", |e| messages(e).len() == 1).await;
+    rt.close("ua");
+    let seen = messages(&events.lock())[0].clone();
+    seen
+}
+
+#[tokio::test]
+async fn ws_default_user_agent_unless_set() {
+    let (addr, _) = spawn().await;
+    let (rt, _) = registry();
+    assert_eq!(
+        ws_seen_user_agent(&rt, &addr, vec![]).await,
+        concat!("VectisAPI/", env!("CARGO_PKG_VERSION"))
+    );
+    assert_eq!(
+        ws_seen_user_agent(&rt, &addr, vec![("user-agent".into(), "mine/1".into())]).await,
+        "mine/1"
+    );
+    let (rt, _) = registry_with(Settings {
+        user_agent: Some("from-settings/2".into()),
+        ..Settings::default()
+    });
+    assert_eq!(
+        ws_seen_user_agent(&rt, &addr, vec![]).await,
+        "from-settings/2"
+    );
+}
+
 #[tokio::test]
 async fn ws_binary_frame_reported() {
     let (addr, _) = spawn().await;
@@ -745,6 +795,25 @@ async fn sse_stream_events_and_last_event_id_sent() {
         .header_for(&Url::parse(&format!("http://{addr}/")).unwrap())
         .unwrap();
     assert!(cookie.contains("sse=1"), "{cookie}");
+}
+
+#[tokio::test]
+async fn sse_user_accept_header_preserved() {
+    let (addr, _) = spawn().await;
+    let (rt, _) = registry();
+    let (events, sink) = collector();
+    let mut spec = sse_spec(format!("http://{addr}/sse/events"));
+    spec.headers
+        .push(("Accept".into(), "application/x-ndjson".into()));
+    rt.open_sse("s".into(), spec, None, sink).await.unwrap();
+    wait_for(&events, "stream end", |e| e.iter().any(is_terminal)).await;
+    let first = events.lock()[2].clone();
+    match first {
+        RtEvent::SseEvent { data, .. } => {
+            assert!(data.starts_with("accept=application/x-ndjson;"), "{data}")
+        }
+        other => panic!("expected first sse event, got {other:?}"),
+    }
 }
 
 #[tokio::test]

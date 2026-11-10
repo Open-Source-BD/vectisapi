@@ -196,7 +196,13 @@ impl RtRegistry {
         if self.conns.contains_key(&conn_id) {
             return Ok(());
         }
-        let request = ws::build_request(&url, &headers, &protocols, &self.jar)?;
+        let request = ws::build_request(
+            &url,
+            &headers,
+            &protocols,
+            &self.pool.user_agent(),
+            &self.jar,
+        )?;
         let open = Arc::new(AtomicBool::new(false));
         let (outgoing, rx) = mpsc::unbounded_channel();
         let kind = ConnKind::Ws {

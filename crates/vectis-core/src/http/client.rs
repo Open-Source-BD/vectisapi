@@ -17,6 +17,8 @@ struct Pooled {
     /// Redirect cap when following is on; `None` when redirects are returned as-is.
     max_redirects: Option<usize>,
     verify_tls: bool,
+    /// Settings User-Agent or `DEFAULT_USER_AGENT`.
+    user_agent: String,
     /// Set when the settings could not be applied (e.g. a bad proxy URL); sends fail with it.
     build_error: Option<String>,
 }
@@ -58,6 +60,12 @@ impl ClientPool {
         self.inner.read().verify_tls
     }
 
+    /// The User-Agent sent unless a request sets its own (used by clients that cannot share
+    /// `client()`).
+    pub(crate) fn user_agent(&self) -> String {
+        self.inner.read().user_agent.clone()
+    }
+
     pub(crate) fn check(&self) -> Result<(), CoreError> {
         match &self.inner.read().build_error {
             Some(msg) => Err(CoreError::new(ErrorKind::Other, msg.clone())),
@@ -76,6 +84,7 @@ fn build(settings: &Settings) -> Pooled {
         timeout_ms: settings.timeout_ms,
         max_redirects: settings.follow_redirects.then_some(settings.max_redirects),
         verify_tls: settings.verify_tls,
+        user_agent: user_agent(settings),
         build_error,
     }
 }
@@ -84,12 +93,7 @@ fn make_client(settings: &Settings) -> Result<reqwest::Client, String> {
     // Redirects are followed by the engine (so the cookie jar sees every hop), and cookies are
     // handled by our own jar, so reqwest's cookie store stays off (feature not enabled).
     let mut b = reqwest::Client::builder()
-        .user_agent(
-            settings
-                .user_agent
-                .clone()
-                .unwrap_or_else(|| DEFAULT_USER_AGENT.to_string()),
-        )
+        .user_agent(user_agent(settings))
         .redirect(reqwest::redirect::Policy::none())
         .tls_danger_accept_invalid_certs(!settings.verify_tls)
         // System/env proxies are off by default; only the configured proxy is used.
@@ -104,4 +108,11 @@ fn make_client(settings: &Settings) -> Result<reqwest::Client, String> {
     }
     b.build()
         .map_err(|e| format!("invalid settings: {}", CoreError::from(e).message))
+}
+
+fn user_agent(settings: &Settings) -> String {
+    settings
+        .user_agent
+        .clone()
+        .unwrap_or_else(|| DEFAULT_USER_AGENT.to_string())
 }

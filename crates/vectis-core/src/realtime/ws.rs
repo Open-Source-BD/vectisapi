@@ -1,19 +1,22 @@
 //! WebSocket client over tokio-tungstenite (rustls). Proxy settings are not applied to
-//! WebSockets in v1; TLS verification follows the settings.
+//! WebSockets in v1; TLS verification and the default User-Agent follow the settings.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::{verify_tls12_signature, verify_tls13_signature, CryptoProvider};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
-use rustls::{DigitallySignedStruct, SignatureScheme};
+use rustls::{ClientConfig, DigitallySignedStruct, SignatureScheme};
+use rustls_platform_verifier::BuilderVerifierExt;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::handshake::client::Request;
-use tokio_tungstenite::tungstenite::http::header::{COOKIE, SEC_WEBSOCKET_PROTOCOL, SET_COOKIE};
+use tokio_tungstenite::tungstenite::http::header::{
+    COOKIE, SEC_WEBSOCKET_PROTOCOL, SET_COOKIE, USER_AGENT,
+};
 use tokio_tungstenite::tungstenite::http::{HeaderName, HeaderValue};
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
@@ -38,12 +41,13 @@ pub(super) struct WsParams {
     pub outgoing: mpsc::UnboundedReceiver<String>,
 }
 
-/// Builds the upgrade request: user headers in order, subprotocols, and the jar's cookies for
-/// the URL unless the user set `Cookie`.
+/// Builds the upgrade request: user headers in order, subprotocols, `default_user_agent` unless
+/// the user set `User-Agent`, and the jar's cookies for the URL unless the user set `Cookie`.
 pub(super) fn build_request(
     raw_url: &str,
     headers: &[(String, String)],
     protocols: &[String],
+    default_user_agent: &str,
     jar: &CookieJar,
 ) -> Result<Request, CoreError> {
     let url = parse_ws_url(raw_url)?;
@@ -76,6 +80,11 @@ pub(super) fn build_request(
         let value = HeaderValue::from_str(&protocols.join(", "))
             .map_err(|_| CoreError::new(ErrorKind::Other, "invalid subprotocol"))?;
         map.insert(SEC_WEBSOCKET_PROTOCOL, value);
+    }
+    if !map.contains_key(USER_AGENT) {
+        if let Ok(value) = HeaderValue::from_str(default_user_agent) {
+            map.insert(USER_AGENT, value);
+        }
     }
     if !map.contains_key(COOKIE) {
         if let Some(cookie) = jar.header_for(&http_url(&url)) {
@@ -141,7 +150,7 @@ pub(super) async fn run(task: ConnTask, params: WsParams) {
         Err(message) => return task.end(RtEvent::Error { message }),
     };
     let handshake =
-        tokio_tungstenite::connect_async_tls_with_config(request, None, false, connector);
+        tokio_tungstenite::connect_async_tls_with_config(request, None, false, Some(connector));
     let connected = tokio::select! {
         () = task.cancelled() => return,
         r = with_timeout(connect_timeout_ms, handshake) => r,
@@ -243,22 +252,31 @@ async fn with_timeout<F: std::future::Future>(ms: u64, fut: F) -> Option<F::Outp
     }
 }
 
-/// `None` uses tokio-tungstenite's default (rustls with the OS root store); verification off
-/// uses a rustls config that accepts any certificate.
-fn tls_connector(verify_tls: bool) -> Result<Option<Connector>, String> {
-    if verify_tls {
-        return Ok(None);
-    }
-    let provider = CryptoProvider::get_default()
-        .cloned()
-        .unwrap_or_else(|| Arc::new(rustls::crypto::aws_lc_rs::default_provider()));
-    let config = rustls::ClientConfig::builder_with_provider(provider.clone())
-        .with_safe_default_protocol_versions()
-        .map_err(|e| format!("TLS setup failed: {e}"))?
-        .dangerous()
-        .with_custom_certificate_verifier(Arc::new(AcceptAnyCert(provider)))
-        .with_no_client_auth();
-    Ok(Some(Connector::Rustls(Arc::new(config))))
+/// TLS config for `wss`, built once per verification mode with an explicit crypto provider
+/// (never rustls's process default, which panics when several providers are compiled in).
+/// Verification on uses the OS platform verifier, as the HTTP client does.
+fn tls_connector(verify_tls: bool) -> Result<Connector, String> {
+    static VERIFIED: OnceLock<Result<Arc<ClientConfig>, String>> = OnceLock::new();
+    static UNVERIFIED: OnceLock<Result<Arc<ClientConfig>, String>> = OnceLock::new();
+    let cell = if verify_tls { &VERIFIED } else { &UNVERIFIED };
+    cell.get_or_init(|| build_tls_config(verify_tls).map_err(|e| format!("TLS setup failed: {e}")))
+        .clone()
+        .map(Connector::Rustls)
+}
+
+fn build_tls_config(verify_tls: bool) -> Result<Arc<ClientConfig>, rustls::Error> {
+    let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+    let builder = ClientConfig::builder_with_provider(provider.clone())
+        .with_safe_default_protocol_versions()?;
+    let config = if verify_tls {
+        builder.with_platform_verifier()?.with_no_client_auth()
+    } else {
+        builder
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(AcceptAnyCert(provider)))
+            .with_no_client_auth()
+    };
+    Ok(Arc::new(config))
 }
 
 /// Skips certificate checks (settings: verify TLS off) but still checks handshake signatures.

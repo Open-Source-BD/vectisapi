@@ -7,6 +7,6 @@ mod store;
 
 pub use client::ClientPool;
 pub use engine::HttpEngine;
-pub(crate) use engine::{attach_body, build_headers, parse_url, redirect_target, strip_on_hop};
+pub(crate) use engine::{build_headers, parse_url, send_following_redirects, HopTimeout};
 pub use spec::{BodySpec, HttpRequestSpec, MultipartPart, PartValue, ResponseMeta, Timing};
 pub use store::{BodyWriter, ResponseStore, INLINE_PREFIX_BYTES};

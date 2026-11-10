@@ -1,10 +1,11 @@
 //! Server-Sent Events: an incremental byte-level parser (WHATWG event-stream, ported from
 //! next-postman's `parseSse.ts`) and the stream task built on the shared reqwest client.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::StreamExt;
-use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, COOKIE, SET_COOKIE};
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT};
 use reqwest::Method;
 use url::Url;
 
@@ -12,10 +13,9 @@ use super::{ConnTask, RtEvent};
 use crate::cookies::CookieJar;
 use crate::error::{CoreError, ErrorKind};
 use crate::http::{
-    attach_body, build_headers, parse_url, redirect_target, strip_on_hop, BodySpec, ClientPool,
+    build_headers, parse_url, send_following_redirects, BodySpec, ClientPool, HopTimeout,
     HttpRequestSpec,
 };
-use std::sync::Arc;
 
 const UTF8_BOM: &[u8] = b"\xEF\xBB\xBF";
 
@@ -163,7 +163,10 @@ pub(super) fn prepare(
         })?;
     let is_multipart = matches!(spec.body, BodySpec::Multipart(_));
     let mut headers = build_headers(&spec.headers, is_multipart)?;
-    headers.insert(ACCEPT, HeaderValue::from_static("text/event-stream"));
+    // A user-set Accept is sent as is.
+    if !headers.contains_key(ACCEPT) {
+        headers.insert(ACCEPT, HeaderValue::from_static("text/event-stream"));
+    }
     if let Some(id) = last_event_id {
         let value = HeaderValue::from_str(id)
             .map_err(|_| CoreError::new(ErrorKind::Other, "invalid Last-Event-ID"))?;
@@ -190,7 +193,7 @@ pub(super) async fn run(
     };
     let response = match response {
         Ok(r) => r,
-        Err(message) => return task.end(RtEvent::Error { message }),
+        Err(e) => return task.end(RtEvent::Error { message: e.message }),
     };
     let status = response.status();
     if !status.is_success() {
@@ -239,85 +242,23 @@ pub(super) async fn run(
     task.end(terminal);
 }
 
-/// Sends the request, following redirects like the HTTP engine (jar per hop, Set-Cookie stored
-/// per hop, 301–303 turn into a body-less GET). Returns the final response.
+/// Sends the request through the engine's redirect handling. Only the wait for each hop's
+/// response headers is time-bounded; the stream itself is not.
 async fn connect(
     request: SseRequest,
     pool: &ClientPool,
     jar: &CookieJar,
-) -> Result<reqwest::Response, String> {
-    let SseRequest {
-        mut url,
-        mut method,
-        mut headers,
-        mut body,
-        connect_timeout_ms,
-    } = request;
-    let client = pool.client();
-    let use_jar = !headers.contains_key(COOKIE);
-    let mut redirects = 0;
-    loop {
-        let mut hop_headers = headers.clone();
-        if use_jar {
-            if let Some(cookie) = jar.header_for(&url) {
-                if let Ok(value) = HeaderValue::from_str(&cookie) {
-                    hop_headers.append(COOKIE, value);
-                }
-            }
-        }
-        let has_content_type = hop_headers.contains_key(reqwest::header::CONTENT_TYPE);
-        let builder = client
-            .request(method.clone(), url.clone())
-            .headers(hop_headers);
-        let builder = attach_body(builder, &body, has_content_type)
-            .await
-            .map_err(|e| e.message)?;
-        let send = builder.send();
-        let response = if connect_timeout_ms == 0 {
-            send.await
-        } else {
-            tokio::time::timeout(Duration::from_millis(connect_timeout_ms), send)
-                .await
-                .map_err(|_| "request timed out".to_string())?
-        }
-        .map_err(|e| CoreError::from(e).message)?;
-
-        let set_cookies: Vec<String> = response
-            .headers()
-            .get_all(SET_COOKIE)
-            .iter()
-            .map(|v| String::from_utf8_lossy(v.as_bytes()).into_owned())
-            .collect();
-        if !set_cookies.is_empty() {
-            jar.store_response(&url, &set_cookies);
-        }
-
-        let Some(max) = pool.max_redirects() else {
-            return Ok(response);
-        };
-        let Some(next) = redirect_target(&response, &url) else {
-            return Ok(response);
-        };
-        if redirects >= max {
-            return Err(format!("too many redirects (max {max})"));
-        }
-        redirects += 1;
-        strip_on_hop(&url, &next, &mut headers);
-        if matches!(response.status().as_u16(), 301..=303)
-            && method != Method::GET
-            && method != Method::HEAD
-        {
-            method = Method::GET;
-            body = BodySpec::None;
-            for name in [
-                reqwest::header::CONTENT_TYPE,
-                reqwest::header::CONTENT_LENGTH,
-                reqwest::header::CONTENT_ENCODING,
-                reqwest::header::TRANSFER_ENCODING,
-            ] {
-                headers.remove(name);
-            }
-        }
-        url = next;
-    }
+) -> Result<reqwest::Response, CoreError> {
+    let header_timeout =
+        (request.connect_timeout_ms > 0).then(|| Duration::from_millis(request.connect_timeout_ms));
+    send_following_redirects(
+        pool,
+        jar,
+        request.url,
+        request.method,
+        request.headers,
+        &request.body,
+        HopTimeout::PerHopHeaders(header_timeout),
+    )
+    .await
 }

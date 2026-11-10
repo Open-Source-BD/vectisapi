@@ -77,91 +77,27 @@ impl HttpEngine {
 
     async fn execute(&self, spec: &HttpRequestSpec) -> Result<(ResponseMeta, Bytes), CoreError> {
         self.pool.check()?;
-        let mut url = parse_url(&spec.url)?;
-        let mut method = Method::from_bytes(spec.method.trim().to_ascii_uppercase().as_bytes())
+        let url = parse_url(&spec.url)?;
+        let method = Method::from_bytes(spec.method.trim().to_ascii_uppercase().as_bytes())
             .map_err(|_| {
                 CoreError::new(ErrorKind::Other, format!("invalid method: {}", spec.method))
             })?;
         let is_multipart = matches!(spec.body, BodySpec::Multipart(_));
-        let mut headers = build_headers(&spec.headers, is_multipart)?;
-        // An explicit Cookie header is sent on every hop and the jar stays out of it.
-        let use_jar = !headers.contains_key(COOKIE);
-        let no_body = BodySpec::None;
-        let mut body = &spec.body;
-
-        let client = self.pool.client();
-        let max_redirects = self.pool.max_redirects();
+        let headers = build_headers(&spec.headers, is_multipart)?;
         let timeout_ms = spec.timeout_ms.unwrap_or_else(|| self.pool.timeout_ms());
         let started = Instant::now();
         // One deadline for the whole chain, final body included.
         let deadline = (timeout_ms > 0).then(|| started + Duration::from_millis(timeout_ms));
-        let mut redirects = 0;
-
-        let response = loop {
-            let mut hop_headers = headers.clone();
-            if use_jar {
-                if let Some(cookie) = self.jar.header_for(&url) {
-                    if let Ok(value) = HeaderValue::from_str(&cookie) {
-                        hop_headers.append(COOKIE, value);
-                    }
-                }
-            }
-            let has_content_type = hop_headers.contains_key(CONTENT_TYPE);
-            let mut request = client
-                .request(method.clone(), url.clone())
-                .headers(hop_headers);
-            if let Some(deadline) = deadline {
-                let remaining = deadline.saturating_duration_since(Instant::now());
-                if remaining.is_zero() {
-                    return Err(CoreError::new(ErrorKind::Timeout, "request timed out"));
-                }
-                request = request.timeout(remaining);
-            }
-            request = attach_body(request, body, has_content_type).await?;
-            let response = request.send().await?;
-
-            let set_cookies: Vec<String> = response
-                .headers()
-                .get_all(SET_COOKIE)
-                .iter()
-                .map(|v| String::from_utf8_lossy(v.as_bytes()).into_owned())
-                .collect();
-            if !set_cookies.is_empty() {
-                self.jar.store_response(&url, &set_cookies);
-            }
-
-            let Some(max) = max_redirects else {
-                break response;
-            };
-            let Some(next) = redirect_target(&response, &url) else {
-                break response;
-            };
-            if redirects >= max {
-                return Err(CoreError::new(
-                    ErrorKind::Other,
-                    format!("too many redirects (max {max})"),
-                ));
-            }
-            redirects += 1;
-            strip_on_hop(&url, &next, &mut headers);
-            // 301/302/303 turn other methods into a body-less GET; GET and HEAD go unchanged.
-            if matches!(response.status().as_u16(), 301..=303)
-                && method != Method::GET
-                && method != Method::HEAD
-            {
-                method = Method::GET;
-                body = &no_body;
-                for name in [
-                    CONTENT_TYPE,
-                    CONTENT_LENGTH,
-                    CONTENT_ENCODING,
-                    TRANSFER_ENCODING,
-                ] {
-                    headers.remove(name);
-                }
-            }
-            url = next;
-        };
+        let response = send_following_redirects(
+            &self.pool,
+            &self.jar,
+            url,
+            method,
+            headers,
+            &spec.body,
+            HopTimeout::Deadline(deadline),
+        )
+        .await?;
         let ttfb_ms = elapsed_ms(started);
 
         let status = response.status();
@@ -210,6 +146,108 @@ impl HttpEngine {
     }
 }
 
+/// How [`send_following_redirects`] bounds time.
+pub(crate) enum HopTimeout {
+    /// One deadline for the whole chain, reading the final body included (HTTP requests).
+    Deadline(Option<Instant>),
+    /// Each hop must deliver response headers in time; the final body is unbounded (streams).
+    PerHopHeaders(Option<Duration>),
+}
+
+/// Sends a request, following redirects when settings say so: the jar's cookies are attached on
+/// every hop unless `headers` has its own `Cookie`, every hop's `Set-Cookie` is stored, headers
+/// that must not cross hosts are stripped, and 301/302/303 turn other methods into a body-less
+/// GET (307/308 keep method and body). Returns the final response.
+pub(crate) async fn send_following_redirects(
+    pool: &ClientPool,
+    jar: &CookieJar,
+    mut url: Url,
+    mut method: Method,
+    mut headers: HeaderMap,
+    body: &BodySpec,
+    timeout: HopTimeout,
+) -> Result<reqwest::Response, CoreError> {
+    // An explicit Cookie header is sent on every hop and the jar stays out of it.
+    let use_jar = !headers.contains_key(COOKIE);
+    let no_body = BodySpec::None;
+    let mut body = body;
+    let client = pool.client();
+    let max_redirects = pool.max_redirects();
+    let timed_out = || CoreError::new(ErrorKind::Timeout, "request timed out");
+    let mut redirects = 0;
+
+    loop {
+        let mut hop_headers = headers.clone();
+        if use_jar {
+            if let Some(cookie) = jar.header_for(&url) {
+                if let Ok(value) = HeaderValue::from_str(&cookie) {
+                    hop_headers.append(COOKIE, value);
+                }
+            }
+        }
+        let has_content_type = hop_headers.contains_key(CONTENT_TYPE);
+        let mut request = client
+            .request(method.clone(), url.clone())
+            .headers(hop_headers);
+        if let HopTimeout::Deadline(Some(deadline)) = timeout {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(timed_out());
+            }
+            request = request.timeout(remaining);
+        }
+        request = attach_body(request, body, has_content_type).await?;
+        let response = match timeout {
+            HopTimeout::PerHopHeaders(Some(limit)) => tokio::time::timeout(limit, request.send())
+                .await
+                .map_err(|_| timed_out())??,
+            _ => request.send().await?,
+        };
+
+        let set_cookies: Vec<String> = response
+            .headers()
+            .get_all(SET_COOKIE)
+            .iter()
+            .map(|v| String::from_utf8_lossy(v.as_bytes()).into_owned())
+            .collect();
+        if !set_cookies.is_empty() {
+            jar.store_response(&url, &set_cookies);
+        }
+
+        let Some(max) = max_redirects else {
+            return Ok(response);
+        };
+        let Some(next) = redirect_target(&response, &url) else {
+            return Ok(response);
+        };
+        if redirects >= max {
+            return Err(CoreError::new(
+                ErrorKind::Other,
+                format!("too many redirects (max {max})"),
+            ));
+        }
+        redirects += 1;
+        strip_on_hop(&url, &next, &mut headers);
+        // 301/302/303 turn other methods into a body-less GET; GET and HEAD go unchanged.
+        if matches!(response.status().as_u16(), 301..=303)
+            && method != Method::GET
+            && method != Method::HEAD
+        {
+            method = Method::GET;
+            body = &no_body;
+            for name in [
+                CONTENT_TYPE,
+                CONTENT_LENGTH,
+                CONTENT_ENCODING,
+                TRANSFER_ENCODING,
+            ] {
+                headers.remove(name);
+            }
+        }
+        url = next;
+    }
+}
+
 /// Unregisters a send's cancellation token when the send finishes (or is dropped).
 struct Registration<'a> {
     inflight: &'a DashMap<String, (u64, CancellationToken)>,
@@ -228,7 +266,7 @@ impl Drop for Registration<'_> {
 
 /// The next URL when `response` is a followable redirect (301/302/303/307/308 with a usable
 /// `Location`, resolved against `current`); otherwise the response is final.
-pub(crate) fn redirect_target(response: &reqwest::Response, current: &Url) -> Option<Url> {
+fn redirect_target(response: &reqwest::Response, current: &Url) -> Option<Url> {
     if !matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308) {
         return None;
     }
@@ -240,7 +278,7 @@ pub(crate) fn redirect_target(response: &reqwest::Response, current: &Url) -> Op
 /// Removes headers that must not follow a redirect from `prev` to `next`: `Authorization` when
 /// the host changes or https downgrades to http (no token leaks; curl and browsers do the same),
 /// and a user-set `Host` when the host changes. `Proxy-Authorization` targets the proxy and stays.
-pub(crate) fn strip_on_hop(prev: &Url, next: &Url, headers: &mut HeaderMap) {
+fn strip_on_hop(prev: &Url, next: &Url, headers: &mut HeaderMap) {
     let host_changed = prev.host_str() != next.host_str();
     let downgraded = prev.scheme() == "https" && next.scheme() == "http";
     if host_changed || downgraded {
@@ -294,7 +332,7 @@ pub(crate) fn build_headers(
     Ok(headers)
 }
 
-pub(crate) async fn attach_body(
+async fn attach_body(
     request: RequestBuilder,
     body: &BodySpec,
     has_content_type: bool,
