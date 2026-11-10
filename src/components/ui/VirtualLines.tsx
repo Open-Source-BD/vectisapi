@@ -50,7 +50,12 @@ function toRows(lines: string[]): Rows {
  * `code-body`): only the rows intersecting the viewport (plus overscan) are in the DOM, and
  * `renderLine` (e.g. syntax highlighting) runs only for those rows.
  */
-export function VirtualLines({ lines, renderLine = escapeHtml, overscan = 20, fallbackHeight = 600 }: VirtualLinesProps) {
+export function VirtualLines({
+  lines,
+  renderLine = escapeHtml,
+  overscan = 20,
+  fallbackHeight = 600,
+}: VirtualLinesProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewport, setViewport] = useState(0);
@@ -89,7 +94,8 @@ export function VirtualLines({ lines, renderLine = escapeHtml, overscan = 20, fa
   first = Math.min(Math.max(0, first), Math.max(0, count - 1));
   const start = Math.max(0, first - overscan);
   const end = Math.min(count, first + visible + overscan);
-  const top = fullHeight > MAX_SCROLL_HEIGHT ? Math.max(0, scrollTop - (first - start) * lineHeight) : start * lineHeight;
+  const top =
+    fullHeight > MAX_SCROLL_HEIGHT ? Math.max(0, scrollTop - (first - start) * lineHeight) : start * lineHeight;
   const bottom = Math.max(0, contentHeight - top - (end - start) * lineHeight);
 
   const numbers: number[] = [];

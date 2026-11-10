@@ -49,7 +49,10 @@ export function CodeView({ text, html, highlight, wrap }: CodeViewProps) {
             ))}
           </div>
           {fullHtml !== undefined ? (
-            <pre className={`code-body${wrap ? ' code-body-wrap' : ''}`} dangerouslySetInnerHTML={{ __html: fullHtml }} />
+            <pre
+              className={`code-body${wrap ? ' code-body-wrap' : ''}`}
+              dangerouslySetInnerHTML={{ __html: fullHtml }}
+            />
           ) : (
             <pre className={`code-body${wrap ? ' code-body-wrap' : ''}`}>{text}</pre>
           )}

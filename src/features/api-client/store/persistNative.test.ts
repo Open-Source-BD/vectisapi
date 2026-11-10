@@ -82,7 +82,12 @@ describe('diffToOps', () => {
 
   it('maps globals, active env, theme and active tab', () => {
     const prev = withState({ globals: [], activeEnvId: null, theme: 'light', activeTabId: 't1' });
-    const next = withState({ globals: [{ id: 'g', key: 'k', value: 'v' }] as never, activeEnvId: 'e1', theme: 'dark', activeTabId: 't2' });
+    const next = withState({
+      globals: [{ id: 'g', key: 'k', value: 'v' }] as never,
+      activeEnvId: 'e1',
+      theme: 'dark',
+      activeTabId: 't2',
+    });
     expect(diffToOps(prev, next)).toEqual([
       { op: 'setGlobals', json: JSON.stringify(next.globals) },
       { op: 'setActiveEnv', id: 'e1' },

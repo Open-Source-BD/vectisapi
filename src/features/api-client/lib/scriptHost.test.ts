@@ -3,7 +3,11 @@ import { runScript } from './scriptHost';
 
 describe('runScript', () => {
   it('pre-request sets var visible to request', async () => {
-    const r = await runScript({ phase: 'pre', code: 'pm.environment.set("a", pm.environment.get("x") + "!")', vars: { x: '1' } });
+    const r = await runScript({
+      phase: 'pre',
+      code: 'pm.environment.set("a", pm.environment.get("x") + "!")',
+      vars: { x: '1' },
+    });
     expect(r.error).toBeUndefined();
     expect(r.setVars).toEqual([['a', '1!']]);
     expect(r.vars).toEqual({ x: '1', a: '1!' });

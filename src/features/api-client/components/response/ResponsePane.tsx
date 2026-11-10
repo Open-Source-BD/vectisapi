@@ -47,7 +47,9 @@ function suggestedFileName(res: ResponseData): string {
   let segment = '';
   try {
     const raw = new URL(res.finalUrl ?? '').pathname.split('/').pop() ?? '';
-    segment = decodeURIComponent(raw).replace(/[\\/:*?"<>|]/g, '_').trim();
+    segment = decodeURIComponent(raw)
+      .replace(/[\\/:*?"<>|]/g, '_')
+      .trim();
   } catch {
     segment = '';
   }
@@ -296,7 +298,9 @@ export function ResponsePane({ onExpand, onCollapse, inModal }: ResponsePaneProp
               <div className="types-bar">
                 {truncated && (
                   <>
-                    <span className="body-notice">Preview only — showing the start of a {formatSize(res.size)} body.</span>
+                    <span className="body-notice">
+                      Preview only — showing the start of a {formatSize(res.size)} body.
+                    </span>
                     <button className="types-lang-btn" onClick={loadFullBody} disabled={loading}>
                       {loading ? 'Loading…' : `Load full body (${formatSize(res.size)})`}
                     </button>
