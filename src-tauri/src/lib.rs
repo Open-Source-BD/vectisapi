@@ -24,13 +24,14 @@ const DB_FILE: &str = "vectisapi.db";
 
 /// Registers every IPC command (the TypeScript contract).
 pub(crate) fn register_commands<R: Runtime>(builder: Builder<R>) -> Builder<R> {
-    use commands::{cookies, db, files, http, realtime, settings};
+    use commands::{cookies, db, files, http, import, realtime, settings};
     builder.invoke_handler(tauri::generate_handler![
         http::send_request,
         http::cancel_request,
         http::get_response_body,
         files::save_response_body,
         files::open_data_dir,
+        import::pick_next_postman_workspace,
         realtime::rt_open_ws,
         realtime::rt_open_sse,
         realtime::rt_send,

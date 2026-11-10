@@ -70,11 +70,11 @@ function CommandPaletteInner() {
       run: act(() => s().toggleTheme()),
     },
     {
-      key: 'workspace',
-      label: 'Connect workspace folder',
-      hint: 'git storage save',
-      icon: 'create_new_folder',
-      run: act(() => s().connectWorkspace()),
+      key: 'settings',
+      label: 'Open settings',
+      hint: 'preferences backup import next-postman proxy timeout',
+      icon: 'settings',
+      run: act(() => s().setSettingsModalOpen(true)),
     },
     {
       key: 'cookies',

@@ -16,6 +16,8 @@ pub enum PickKind {
         file_name: String,
     },
     Open,
+    /// Folder picker.
+    Folder,
 }
 
 pub struct PickRequest {
@@ -49,6 +51,7 @@ pub fn dialog_picker<R: Runtime>(app: AppHandle<R>) -> FilePicker {
         match request.kind {
             PickKind::Save { file_name } => builder.set_file_name(file_name).save_file(reply),
             PickKind::Open => builder.pick_file(reply),
+            PickKind::Folder => builder.pick_folder(reply),
         }
         rx
     })

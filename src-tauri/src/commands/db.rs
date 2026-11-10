@@ -53,7 +53,7 @@ pub async fn search_history(
     state.db.search_history(q, limit).await
 }
 
-/// File types offered when importing; Task 14 adds next-postman workspace zips.
+/// File types offered when importing a backup (next-postman workspaces: `pick_next_postman_workspace`).
 const IMPORT_FILTERS: &[Filter] = &[("VectisAPI backup", &["json"])];
 const BACKUP_FILTERS: &[Filter] = &[("VectisAPI backup", &["json"])];
 

@@ -5,7 +5,6 @@ import {
   createCollectionsSlice,
   createEnvironmentsSlice,
   createUiSlice,
-  createWorkspaceSlice,
 } from './slices';
 import type { StoreState } from './slices/types';
 import { closeConnection } from '../lib/realtimeConnection';
@@ -16,7 +15,6 @@ export const useApiStore = create<StoreState>()((...a) => ({
   ...createCollectionsSlice(...a),
   ...createEnvironmentsSlice(...a),
   ...createUiSlice(...a),
-  ...createWorkspaceSlice(...a),
 }));
 
 // Close the live realtime connection of every tab that disappears (explicit close, the
@@ -30,4 +28,3 @@ useApiStore.subscribe((state, prev) => {
 // Re-export shared helpers for backward-compatible imports.
 export { createDefaultTab, selectActiveTab, selectActiveVars } from './slices/helpers';
 export type { PendingSave } from './slices/helpers';
-export type { WorkspaceStatus } from './slices/uiSlice';

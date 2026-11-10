@@ -1,3 +1,4 @@
+import { getVersion } from '@tauri-apps/api/app';
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
@@ -55,6 +56,48 @@ export function saveResponseBody(id: string, suggestedName?: string): Promise<st
 
 export function getSettings(): Promise<Settings> {
   return invoke<Settings>('get_settings');
+}
+
+/** Saves the settings and applies them to the engine (never via `save_entities`). */
+export function setSettings(settings: Settings): Promise<void> {
+  return invoke<void>('set_settings', { settings });
+}
+
+/** The app version (`VectisAPI/<version>` is the default User-Agent). */
+export function getAppVersion(): Promise<string> {
+  return getVersion();
+}
+
+/** Shows a save dialog and writes a full backup there; the path, or null if cancelled. */
+export function exportBackup(): Promise<string | null> {
+  return invoke<string | null>('export_backup');
+}
+
+/**
+ * Shows an open dialog and replaces the whole workspace with the chosen backup (settings applied
+ * in Rust); the path, or null if cancelled. Reload with `load_workspace` afterwards.
+ */
+export function importBackup(): Promise<string | null> {
+  return invoke<string | null>('import_backup');
+}
+
+/** Opens the folder holding the database in the OS file manager. */
+export function openDataDir(): Promise<void> {
+  return invoke<void>('open_data_dir');
+}
+
+/** One file of a next-postman workspace: `/`-separated path relative to the zip/folder root. */
+export interface NextPostmanFile {
+  path: string;
+  text: string;
+}
+
+/**
+ * Shows a dialog for a next-postman workspace `.zip` or folder and returns its `*.json` files
+ * (null if cancelled). Rejects with "Workspace too large" past 50 MB.
+ */
+export function pickNextPostmanWorkspace(source: 'zip' | 'folder'): Promise<NextPostmanFile[] | null> {
+  return invoke<NextPostmanFile[] | null>('pick_next_postman_workspace', { source });
 }
 
 export function cookiesList(): Promise<CookieView[]> {

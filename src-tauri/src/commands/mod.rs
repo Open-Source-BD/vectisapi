@@ -4,5 +4,6 @@ pub mod cookies;
 pub mod db;
 pub mod files;
 pub mod http;
+pub mod import;
 pub mod realtime;
 pub mod settings;

@@ -5,6 +5,7 @@ import {
   onFlush,
   saveEntities,
   type EntityOp,
+  type WorkspaceSnapshot,
 } from '../lib/native/invoke';
 import type { HistoryItem, TabState } from '../types';
 import type { StoreState } from './slices/types';
@@ -131,6 +132,29 @@ export async function flushNow(): Promise<void> {
   await Promise.all([...inflight]);
 }
 
+/** Replaces the store's persisted state (workspace + settings) with `snap`. */
+function hydrateFrom(snap: WorkspaceSnapshot): void {
+  useApiStore.getState().hydrate({
+    history: snap.history as HistoryItem[],
+    collections: snap.collections,
+    environments: snap.environments,
+    activeEnvId: snap.activeEnvId,
+    globals: Array.isArray(snap.globals) ? (snap.globals as never) : [],
+    tabs: snap.tabs as TabState[],
+    activeTabId: typeof snap.uiState.activeTabId === 'string' ? snap.uiState.activeTabId : undefined,
+    theme: typeof snap.uiState.theme === 'string' ? snap.uiState.theme : undefined,
+  });
+  useApiStore.setState({ settings: snap.settings });
+}
+
+/**
+ * Re-reads everything from SQLite into the store (after a backup import replaced the database).
+ * Call `flushNow` before the import so debounced edits can't overwrite the imported data.
+ */
+export async function reloadWorkspace(): Promise<void> {
+  hydrateFrom(await loadWorkspace());
+}
+
 /**
  * Loads the workspace from SQLite into the store (a failed load starts clean), then persists
  * store changes with a per-entity debounce and flushes when Rust asks on window close.
@@ -150,24 +174,12 @@ export async function startPersistence(): Promise<() => void> {
     })
     .catch((e: unknown) => console.warn('flush listener failed', e));
 
-  const store = useApiStore.getState();
   try {
-    const snap = await loadWorkspace();
-    store.hydrate({
-      history: snap.history as HistoryItem[],
-      collections: snap.collections,
-      environments: snap.environments,
-      activeEnvId: snap.activeEnvId,
-      globals: Array.isArray(snap.globals) ? (snap.globals as never) : [],
-      tabs: snap.tabs as TabState[],
-      activeTabId: typeof snap.uiState.activeTabId === 'string' ? snap.uiState.activeTabId : undefined,
-      theme: typeof snap.uiState.theme === 'string' ? snap.uiState.theme : undefined,
-    });
-    useApiStore.setState({ settings: snap.settings });
+    hydrateFrom(await loadWorkspace());
   } catch (e) {
     // Unreadable database → start clean (still mark hydrated).
     console.warn('load_workspace failed', e);
-    store.hydrate({});
+    useApiStore.getState().hydrate({});
   }
 
   const unsub = useApiStore.subscribe((state, prev) => {

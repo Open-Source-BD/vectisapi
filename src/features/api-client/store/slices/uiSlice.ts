@@ -2,10 +2,9 @@ import type { StateCreator } from 'zustand';
 import type { StoreState } from './types';
 import type { SidebarTab } from '../../types';
 import type { CodeLang } from '../../lib/codegen';
-import { getSettings, type Settings } from '../../lib/native/invoke';
+import { getSettings, setSettings, type Settings } from '../../lib/native/invoke';
 
 export type Theme = 'light' | 'dark';
-export type WorkspaceStatus = 'disconnected' | 'connected' | 'reconnect' | 'unsupported';
 
 export interface UiSlice {
   theme: Theme;
@@ -19,6 +18,7 @@ export interface UiSlice {
   isResponseModalOpen: boolean;
   isCommandPaletteOpen: boolean;
   isCookieModalOpen: boolean;
+  isSettingsModalOpen: boolean;
   historySearch: string;
   codeLang: CodeLang;
   codeSnippet: string;
@@ -37,6 +37,7 @@ export interface UiSlice {
   setResponseModalOpen: (v: boolean) => void;
   setCommandPaletteOpen: (v: boolean) => void;
   setCookieModalOpen: (v: boolean) => void;
+  setSettingsModalOpen: (v: boolean) => void;
   setSaveModalOpen: (v: boolean) => void;
   setCodeModalOpen: (v: boolean) => void;
   setCodeLang: (v: CodeLang) => void;
@@ -45,6 +46,8 @@ export interface UiSlice {
   toggleTheme: () => void;
   setTheme: (t: Theme) => void;
   loadSettings: () => Promise<void>;
+  /** Saves via `set_settings` (Rust applies them), then updates `settings`. Rejects if saving fails. */
+  saveSettings: (settings: Settings) => Promise<void>;
 }
 
 export const createUiSlice: StateCreator<StoreState, [], [], UiSlice> = (set) => ({
@@ -59,6 +62,7 @@ export const createUiSlice: StateCreator<StoreState, [], [], UiSlice> = (set) =>
   isResponseModalOpen: false,
   isCommandPaletteOpen: false,
   isCookieModalOpen: false,
+  isSettingsModalOpen: false,
   historySearch: '',
   codeLang: 'curl' as CodeLang,
   codeSnippet: '',
@@ -75,6 +79,7 @@ export const createUiSlice: StateCreator<StoreState, [], [], UiSlice> = (set) =>
   setResponseModalOpen: (isResponseModalOpen) => set({ isResponseModalOpen }),
   setCommandPaletteOpen: (isCommandPaletteOpen) => set({ isCommandPaletteOpen }),
   setCookieModalOpen: (isCookieModalOpen) => set({ isCookieModalOpen }),
+  setSettingsModalOpen: (isSettingsModalOpen) => set({ isSettingsModalOpen }),
   setSaveModalOpen: (isSaveModalOpen) => set({ isSaveModalOpen }),
   setCodeModalOpen: (isCodeModalOpen) => set({ isCodeModalOpen }),
   setCodeLang: (codeLang) => set({ codeLang }),
@@ -89,5 +94,9 @@ export const createUiSlice: StateCreator<StoreState, [], [], UiSlice> = (set) =>
       // The engine still applies its own settings; only the UI copy is missing.
       console.warn('get_settings failed', e);
     }
+  },
+  saveSettings: async (settings) => {
+    await setSettings(settings);
+    set({ settings });
   },
 });

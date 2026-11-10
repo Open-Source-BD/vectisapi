@@ -16,6 +16,7 @@ import { RunnerModal } from './components/modals/RunnerModal';
 import { CommandPalette } from './components/CommandPalette';
 import { CookiesModal } from './components/modals/CookiesModal';
 import { SaveModal } from './components/modals/SaveModal';
+import { SettingsModal } from './components/modals/SettingsModal';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useRequestRunner } from './hooks/useRequestRunner';
 import { exportData, parseImportFile } from './lib/importExport';
@@ -32,11 +33,6 @@ export function ApiClient() {
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
-
-  // Reconnect a previously-granted workspace folder (permission is re-queried).
-  useEffect(() => {
-    useApiStore.getState().restoreWorkspace();
-  }, []);
 
   // Native settings (default request timeout, ...) — fetched once at startup.
   useEffect(() => {
@@ -127,6 +123,7 @@ export function ApiClient() {
       <RunnerModal />
       <CommandPalette />
       <CookiesModal />
+      <SettingsModal />
     </div>
   );
 }

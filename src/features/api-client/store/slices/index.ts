@@ -11,7 +11,4 @@ export { createEnvironmentsSlice } from './environmentsSlice';
 export type { EnvironmentsSlice } from './environmentsSlice';
 
 export { createUiSlice } from './uiSlice';
-export type { UiSlice, Theme, WorkspaceStatus } from './uiSlice';
-
-export { createWorkspaceSlice } from './workspaceSlice';
-export type { WorkspaceSlice } from './workspaceSlice';
+export type { UiSlice, Theme } from './uiSlice';
