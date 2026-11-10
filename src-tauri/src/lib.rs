@@ -1,4 +1,5 @@
 mod commands;
+mod picker;
 mod state;
 #[cfg(test)]
 mod test_support;
@@ -55,7 +56,6 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             match open_state(app.handle()) {
@@ -83,7 +83,12 @@ fn open_state<R: Runtime>(app: &AppHandle<R>) -> Result<AppState, String> {
         .map_err(|e| format!("cannot create {}: {e}", data_dir.display()))?;
     let db = Db::open(&data_dir.join(DB_FILE)).map_err(|e| e.message)?;
     let snapshot = tauri::async_runtime::block_on(db.load_workspace()).map_err(|e| e.message)?;
-    Ok(AppState::new(db, &snapshot, data_dir))
+    Ok(AppState::new(
+        db,
+        &snapshot,
+        data_dir,
+        picker::dialog_picker(app.clone()),
+    ))
 }
 
 /// Hides the window, shows the error natively and exits once it is dismissed.

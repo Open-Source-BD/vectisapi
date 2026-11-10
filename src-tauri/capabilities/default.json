@@ -1,12 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Main window: core APIs and native file/message dialogs. File reads/writes and opening the data folder happen in Rust commands.",
+  "description": "Main window: core APIs, the open dialog (form-data file picking) and message dialogs. Backup/body files are picked and written by Rust commands.",
   "windows": ["main"],
   "permissions": [
     "core:default",
     "dialog:allow-open",
-    "dialog:allow-save",
     "dialog:allow-message"
   ]
 }

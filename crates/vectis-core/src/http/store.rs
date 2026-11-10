@@ -54,6 +54,31 @@ impl Inner {
     }
 }
 
+/// Zero-copy slices of `chunks` covering `start..end` (clamped like [`ResponseStore::get_range`]).
+fn range_slices(chunks: &[Bytes], start: u64, end: Option<u64>) -> Vec<Bytes> {
+    let total = body_len(chunks);
+    let end = end.unwrap_or(total).min(total);
+    let start = start.min(end);
+    let mut parts = Vec::new();
+    if start == end {
+        return parts;
+    }
+    let mut offset = 0u64;
+    for chunk in chunks {
+        if offset >= end {
+            break;
+        }
+        let chunk_end = offset + chunk.len() as u64;
+        if chunk_end > start {
+            let from = start.saturating_sub(offset) as usize;
+            let to = (end.min(chunk_end) - offset) as usize;
+            parts.push(chunk.slice(from..to));
+        }
+        offset = chunk_end;
+    }
+    parts
+}
+
 fn body_len(chunks: &[Bytes]) -> u64 {
     chunks.iter().map(|c| c.len() as u64).sum()
 }
@@ -91,28 +116,25 @@ impl ResponseStore {
     }
 
     /// Bytes `start..end` (end exclusive, clamped to the body length; `None` = to the end).
+    /// The store lock is held only to take refcounted slices of the chunks; the copy into one
+    /// buffer happens after it is released, and a range inside one chunk is not copied at all.
     pub fn get_range(&self, response_id: &str, start: u64, end: Option<u64>) -> Option<Bytes> {
-        let mut inner = self.inner.lock();
-        inner.touch(response_id);
-        let chunks = inner.bodies.get(response_id)?;
-        let total = body_len(chunks);
-        let end = end.unwrap_or(total).min(total);
-        let start = start.min(end);
-        let mut out = BytesMut::with_capacity((end - start) as usize);
-        let mut offset = 0u64;
-        for chunk in chunks {
-            let chunk_end = offset + chunk.len() as u64;
-            if chunk_end > start && offset < end {
-                let from = start.saturating_sub(offset) as usize;
-                let to = (end.min(chunk_end) - offset) as usize;
-                out.extend_from_slice(&chunk[from..to]);
+        let parts = {
+            let mut inner = self.inner.lock();
+            inner.touch(response_id);
+            range_slices(inner.bodies.get(response_id)?, start, end)
+        };
+        Some(match parts.as_slice() {
+            [] => Bytes::new(),
+            [one] => one.clone(),
+            _ => {
+                let mut out = BytesMut::with_capacity(parts.iter().map(Bytes::len).sum());
+                for part in &parts {
+                    out.extend_from_slice(part);
+                }
+                out.freeze()
             }
-            offset = chunk_end;
-            if offset >= end {
-                break;
-            }
-        }
-        Some(out.freeze())
+        })
     }
 
     pub fn len(&self, response_id: &str) -> Option<u64> {
@@ -120,6 +142,8 @@ impl ResponseStore {
         inner.bodies.get(response_id).map(|c| body_len(c))
     }
 
+    /// Writes the body to `path`. Only refcounted chunk handles are taken under the lock; the
+    /// disk write happens after it is released.
     pub fn save_to_file(&self, response_id: &str, path: &Path) -> Result<(), CoreError> {
         let chunks = {
             let mut inner = self.inner.lock();
@@ -202,5 +226,93 @@ impl Drop for BodyWriter {
         if !self.finished {
             self.release();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn store_with(chunks: &[&'static [u8]]) -> ResponseStore {
+        let store = ResponseStore::new(u64::MAX);
+        let mut writer = store.begin("r");
+        for chunk in chunks {
+            writer.push(Bytes::from_static(chunk)).unwrap();
+        }
+        writer.finish();
+        store
+    }
+
+    /// What runs under the store lock only takes refcounted views of the stored chunks: every
+    /// slice points into stored memory, so no body bytes are copied while the lock is held.
+    #[test]
+    fn range_slices_are_zero_copy_views() {
+        let chunks = [
+            Bytes::from_static(b"abcd"),
+            Bytes::from_static(b"efgh"),
+            Bytes::from_static(b"ijkl"),
+        ];
+        let parts = range_slices(&chunks, 2, Some(10));
+        let joined: Vec<u8> = parts.iter().flat_map(|p| p.iter().copied()).collect();
+        assert_eq!(joined, b"cdefghij");
+        assert_eq!(parts.len(), 3);
+        assert_eq!(parts[0].as_ptr(), chunks[0][2..].as_ptr());
+        assert_eq!(parts[1].as_ptr(), chunks[1].as_ptr());
+        assert_eq!(parts[2].as_ptr(), chunks[2].as_ptr());
+        assert!(range_slices(&chunks, 5, Some(5)).is_empty());
+        assert!(range_slices(&chunks, 50, None).is_empty());
+    }
+
+    #[test]
+    fn get_range_within_one_chunk_is_not_copied() {
+        static FIRST: &[u8] = b"hello ";
+        let store = store_with(&[FIRST, b"world"]);
+        let got = store.get_range("r", 1, Some(4)).unwrap();
+        assert_eq!(&got[..], b"ell");
+        assert_eq!(got.as_ptr(), FIRST[1..].as_ptr());
+    }
+
+    #[test]
+    fn get_range_across_chunks_concatenates() {
+        let store = store_with(&[b"hello ", b"wor", b"ld"]);
+        assert_eq!(&store.get_range("r", 4, None).unwrap()[..], b"o world");
+        assert_eq!(&store.get_range("r", 0, Some(0)).unwrap()[..], b"");
+    }
+
+    /// While a caller holds a large multi-chunk range (being copied outside the lock), other
+    /// store users are not blocked.
+    #[test]
+    fn get_range_does_not_hold_lock_during_copy() {
+        let chunk = Bytes::from(vec![7u8; 1024 * 1024]);
+        let store = Arc::new(ResponseStore::new(u64::MAX));
+        let mut writer = store.begin("big");
+        for _ in 0..64 {
+            writer.push(chunk.clone()).unwrap();
+        }
+        writer.finish();
+        let reader = {
+            let store = store.clone();
+            std::thread::spawn(move || {
+                for _ in 0..20 {
+                    assert_eq!(
+                        store.get_range("big", 1, None).unwrap().len(),
+                        64 * 1024 * 1024 - 1
+                    );
+                }
+            })
+        };
+        // The lock is only taken briefly by each get_range, so pushes keep going.
+        let mut max_wait = std::time::Duration::ZERO;
+        while !reader.is_finished() {
+            let t = std::time::Instant::now();
+            drop(store.inner.lock());
+            max_wait = max_wait.max(t.elapsed());
+        }
+        reader.join().unwrap();
+        // Copying 64 MB under the lock took ~200 ms here (debug); a brief lock is far below this.
+        assert!(
+            max_wait < std::time::Duration::from_millis(20),
+            "{max_wait:?}"
+        );
     }
 }

@@ -7,6 +7,13 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 
+# Smaller dev/test builds: line tables for our crates, no debug info for dependencies.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 [profile.release]
 lto = "fat"
 codegen-units = 1

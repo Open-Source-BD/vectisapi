@@ -1,6 +1,9 @@
 //! Mock-runtime app and IPC helpers for command tests.
 
 use std::path::PathBuf;
+use std::sync::Arc;
+
+use parking_lot::Mutex;
 
 use axum::Router;
 use serde_json::Value;
@@ -12,19 +15,30 @@ use tauri::webview::InvokeRequest;
 use tauri::{App, Manager, WebviewWindow};
 use vectis_core::db::Db;
 
+use crate::picker::fixed_picker;
 use crate::state::AppState;
 
 /// An app with every command registered and state over an in-memory DB.
+/// File dialogs answer with no choice (cancel).
 pub fn app() -> (App<MockRuntime>, WebviewWindow<MockRuntime>) {
-    app_with_db(Db::open_in_memory().unwrap(), PathBuf::new())
+    app_with_picker(Arc::default())
 }
 
-pub fn app_with_db(db: Db, data_dir: PathBuf) -> (App<MockRuntime>, WebviewWindow<MockRuntime>) {
+/// File dialogs answer with whatever `answer` holds at the time.
+pub fn app_with_picker(
+    answer: Arc<Mutex<Option<PathBuf>>>,
+) -> (App<MockRuntime>, WebviewWindow<MockRuntime>) {
     let app = crate::register_commands(mock_builder())
         .build(mock_context(noop_assets()))
         .unwrap();
+    let db = Db::open_in_memory().unwrap();
     let snapshot = tauri::async_runtime::block_on(db.load_workspace()).unwrap();
-    app.manage(AppState::new(db, &snapshot, data_dir));
+    app.manage(AppState::new(
+        db,
+        &snapshot,
+        PathBuf::new(),
+        fixed_picker(answer),
+    ));
     let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
         .build()
         .unwrap();

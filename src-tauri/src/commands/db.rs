@@ -1,11 +1,13 @@
 //! Workspace persistence, history and full backups.
 
-use std::path::PathBuf;
+use std::time::SystemTime;
 
 use tauri::State;
 use vectis_core::db::{EntityOp, WorkspaceSnapshot};
 use vectis_core::error::CoreError;
 
+use crate::commands::files::{date_stamp, write_atomic};
+use crate::picker::{pick, Filter, PickKind, PickRequest};
 use crate::state::AppState;
 
 #[tauri::command]
@@ -51,23 +53,46 @@ pub async fn search_history(
     state.db.search_history(q, limit).await
 }
 
-/// Writes a full backup to `path` (from the save dialog).
+/// File types offered when importing; Task 14 adds next-postman workspace zips.
+const IMPORT_FILTERS: &[Filter] = &[("VectisAPI backup", &["json"])];
+const BACKUP_FILTERS: &[Filter] = &[("VectisAPI backup", &["json"])];
+
+/// Asks where to save, then writes a full backup there atomically. Returns the chosen path, or
+/// `None` if the user cancelled.
 #[tauri::command]
-pub async fn export_backup(state: State<'_, AppState>, path: PathBuf) -> Result<(), CoreError> {
+pub async fn export_backup(state: State<'_, AppState>) -> Result<Option<String>, CoreError> {
+    let request = PickRequest {
+        kind: PickKind::Save {
+            file_name: format!("vectisapi-backup-{}.json", date_stamp(SystemTime::now())),
+        },
+        title: "Export backup",
+        filters: BACKUP_FILTERS,
+    };
+    let Some(path) = pick(&state.picker, request).await else {
+        return Ok(None);
+    };
     let json = state.db.export_backup().await?;
-    tokio::fs::write(&path, json).await?;
-    Ok(())
+    write_atomic(&path, json.into_bytes()).await?;
+    Ok(Some(path.to_string_lossy().into_owned()))
 }
 
-/// Replaces the workspace with the backup at `path` (from the open dialog) and applies its
-/// settings. The frontend reloads with `load_workspace` afterwards.
+/// Asks for a backup file, replaces the workspace with it and applies its settings. Returns the
+/// chosen path, or `None` if the user cancelled. The frontend reloads with `load_workspace`.
 #[tauri::command]
-pub async fn import_backup(state: State<'_, AppState>, path: PathBuf) -> Result<(), CoreError> {
+pub async fn import_backup(state: State<'_, AppState>) -> Result<Option<String>, CoreError> {
+    let request = PickRequest {
+        kind: PickKind::Open,
+        title: "Import backup",
+        filters: IMPORT_FILTERS,
+    };
+    let Some(path) = pick(&state.picker, request).await else {
+        return Ok(None);
+    };
     let json = tokio::fs::read_to_string(&path).await?;
     state.db.import_backup(json).await?;
     let snapshot = state.db.load_workspace().await?;
     state.apply_settings(snapshot.settings);
-    Ok(())
+    Ok(Some(path.to_string_lossy().into_owned()))
 }
 
 /// The frontend finished flushing pending writes after `vectis://flush`.
@@ -80,17 +105,21 @@ pub fn flush_done(state: State<'_, AppState>) {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use std::sync::Arc;
 
-    use crate::test_support::{app, invoke, invoke_json};
+    use parking_lot::Mutex;
+    use serde_json::{json, Value};
+
+    use crate::commands::files::temp_dir;
+    use crate::test_support::{app, app_with_picker, invoke, invoke_json};
 
     #[test]
     fn backup_export_then_import_restores_and_applies_settings() {
-        let dir = std::env::temp_dir().join(format!("vectis-t7-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = temp_dir("backup");
         let path = dir.join("backup.json");
+        let answer = Arc::new(Mutex::new(None));
 
-        let (_app, webview) = app();
+        let (_app, webview) = app_with_picker(answer.clone());
         invoke(
             &webview,
             "save_entities",
@@ -101,10 +130,21 @@ mod tests {
         let mut settings = invoke_json(&webview, "get_settings", json!({}));
         settings["timeoutMs"] = json!(777);
         invoke(&webview, "set_settings", json!({ "settings": settings })).unwrap();
-        invoke(&webview, "export_backup", json!({ "path": path })).unwrap();
 
-        let (_app2, fresh) = app();
-        invoke(&fresh, "import_backup", json!({ "path": path })).unwrap();
+        // Cancelled dialog: nothing written.
+        assert_eq!(
+            invoke_json(&webview, "export_backup", json!({})),
+            Value::Null
+        );
+        assert!(!path.exists());
+
+        *answer.lock() = Some(path.clone());
+        let written = invoke_json(&webview, "export_backup", json!({}));
+        assert_eq!(written, json!(path.to_string_lossy()));
+
+        let (_app2, fresh) = app_with_picker(answer.clone());
+        let read = invoke_json(&fresh, "import_backup", json!({}));
+        assert_eq!(read, json!(path.to_string_lossy()));
         let snapshot = invoke_json(&fresh, "load_workspace", json!({}));
         assert_eq!(snapshot["collections"][0]["name"], "API");
         assert_eq!(
@@ -112,6 +152,15 @@ mod tests {
             777
         );
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn import_cancelled_changes_nothing() {
+        let (_app, webview) = app();
+        assert_eq!(
+            invoke_json(&webview, "import_backup", json!({})),
+            Value::Null
+        );
     }
 
     #[test]

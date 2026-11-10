@@ -25,19 +25,28 @@ pub fn cancel_request(state: State<'_, AppState>, request_id: String) -> bool {
     state.engine.cancel(&request_id)
 }
 
-/// Raw body bytes `start..end` (end exclusive; `None` = to the end).
+/// Raw body bytes `start..end` (end exclusive; `None` = to the end). Async and off the async
+/// workers: assembling a large range copies up to the store cap.
 #[tauri::command]
-pub fn get_response_body(
+pub async fn get_response_body(
     state: State<'_, AppState>,
     response_id: String,
     start: u64,
     end: Option<u64>,
 ) -> Result<Response, CoreError> {
-    state
-        .store
-        .get_range(&response_id, start, end)
-        .map(|bytes| Response::new(bytes.to_vec()))
-        .ok_or_else(|| CoreError::new(ErrorKind::Other, "Response body no longer available"))
+    let store = state.store.clone();
+    let range =
+        tauri::async_runtime::spawn_blocking(move || store.get_range(&response_id, start, end))
+            .await
+            .map_err(|e| CoreError::new(ErrorKind::Other, format!("reading body failed: {e}")))?;
+    range
+        // Zero-copy when the range was freshly assembled (sole owner of its buffer).
+        .map(|bytes| Response::new(Vec::from(bytes)))
+        .ok_or_else(body_gone)
+}
+
+pub(crate) fn body_gone() -> CoreError {
+    CoreError::new(ErrorKind::Other, "Response body no longer available")
 }
 
 fn encode_frame(meta: &ResponseMeta, prefix: &[u8]) -> Result<Vec<u8>, CoreError> {

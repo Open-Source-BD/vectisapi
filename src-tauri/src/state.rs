@@ -15,6 +15,8 @@ use vectis_core::http::{ClientPool, HttpEngine, ResponseStore};
 use vectis_core::realtime::RtRegistry;
 use vectis_core::settings::Settings;
 
+use crate::picker::FilePicker;
+
 /// Delay between a cookie-changing action and the jar being written to the DB.
 pub const JAR_PERSIST_DEBOUNCE: Duration = Duration::from_secs(1);
 
@@ -29,6 +31,8 @@ pub struct AppState {
     pub jar_persister: Arc<JarPersister>,
     /// Folder holding `vectisapi.db`, opened by `open_data_dir`.
     pub data_dir: PathBuf,
+    /// Native file dialogs for commands that read or write user files.
+    pub picker: FilePicker,
     /// Close-flow progress: `RUNNING` → `SHUTTING_DOWN` → `SHUT_DOWN`.
     shutdown_phase: AtomicU8,
     /// Completed by the `flush_done` command while the close flow waits for the frontend.
@@ -37,7 +41,12 @@ pub struct AppState {
 
 impl AppState {
     /// Wires the core objects from the stored settings and cookie jar in `snapshot`.
-    pub fn new(db: Db, snapshot: &WorkspaceSnapshot, data_dir: PathBuf) -> Self {
+    pub fn new(
+        db: Db,
+        snapshot: &WorkspaceSnapshot,
+        data_dir: PathBuf,
+        picker: FilePicker,
+    ) -> Self {
         let db = Arc::new(db);
         let settings = snapshot.settings.clone();
         let jar = Arc::new(
@@ -66,6 +75,7 @@ impl AppState {
             settings: RwLock::new(settings),
             jar_persister,
             data_dir,
+            picker,
             shutdown_phase: AtomicU8::new(RUNNING),
             flush_waiter: Mutex::new(None),
         }
