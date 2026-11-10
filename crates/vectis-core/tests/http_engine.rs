@@ -480,6 +480,34 @@ fn eviction_never_drops_the_body_being_written() {
     assert_eq!(store.len("cur"), Some(8));
 }
 
+#[test]
+fn over_cap_across_chunks_releases_partial_body() {
+    use bytes::Bytes;
+    let kb = 1024;
+    let store = ResponseStore::new(1024 * kb as u64);
+    let mut w = store.begin("big");
+    w.push(Bytes::from(vec![0u8; 600 * kb])).unwrap();
+    assert_eq!(store.used_bytes(), 600 * kb as u64);
+    let err = w.push(Bytes::from(vec![0u8; 600 * kb])).unwrap_err();
+    assert_eq!(err.kind, ErrorKind::BodyTooLarge);
+    assert_eq!(store.used_bytes(), 0);
+    drop(w);
+    assert_eq!(store.used_bytes(), 0);
+    assert_eq!(store.len("big"), None);
+}
+
+#[test]
+fn dropped_writer_without_finish_releases_bytes() {
+    use bytes::Bytes;
+    let store = ResponseStore::new(1024);
+    let mut w = store.begin("abandoned");
+    w.push(Bytes::from_static(&[1; 100])).unwrap();
+    assert_eq!(store.used_bytes(), 100);
+    drop(w);
+    assert_eq!(store.used_bytes(), 0);
+    assert_eq!(store.len("abandoned"), None);
+}
+
 #[tokio::test]
 async fn body_over_cap_errors() {
     let base = server::spawn().await;
