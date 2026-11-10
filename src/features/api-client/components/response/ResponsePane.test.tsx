@@ -147,3 +147,63 @@ describe('ResponsePane large bodies', () => {
     expect(host.querySelector('[role="alert"]')?.textContent).toContain('Response body no longer available');
   });
 });
+
+describe('ResponsePane timing popover', () => {
+  let root: Root;
+  let host: HTMLElement;
+  const timed = { timing: { totalMs: 120, ttfbMs: 45 }, httpVersion: 'HTTP/2' };
+
+  const show = (res: ResponseData) => {
+    const tab = { ...createDefaultTab(), response: res, activeResTab: 'body' as const };
+    act(() => useApiStore.setState({ tabs: [tab], activeTabId: tab.id }));
+  };
+  const time = () => host.querySelector<HTMLElement>('.metric-time')!;
+  const trigger = () => host.querySelector<HTMLElement>('.timing-trigger');
+  const popover = () => host.querySelector('.timing-popover');
+
+  beforeEach(() => {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    act(() => root.render(<ResponsePane />));
+  });
+  afterEach(() => {
+    act(() => root.unmount());
+    host.remove();
+  });
+
+  it('hovering time shows TTFB, download, total and HTTP version', () => {
+    show(response(timed));
+    expect(popover()).toBeNull();
+    act(() => time().dispatchEvent(new MouseEvent('mouseover', { bubbles: true })));
+    const text = popover()?.textContent ?? '';
+    expect(text).toContain('Time to first byte45 ms');
+    expect(text).toContain('Download75 ms');
+    expect(text).toContain('Total120 ms');
+    expect(text).toContain('HTTP versionHTTP/2');
+    act(() => time().dispatchEvent(new MouseEvent('mouseout', { bubbles: true })));
+    expect(popover()).toBeNull();
+  });
+
+  it('keyboard focus shows it, blur and Escape hide it', () => {
+    show(response(timed));
+    expect(trigger()?.tabIndex).toBe(0);
+    act(() => trigger()!.focus());
+    expect(popover()).not.toBeNull();
+    expect(trigger()!.getAttribute('aria-describedby')).toBe(popover()!.id);
+    act(() => {
+      trigger()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(popover()).toBeNull();
+    act(() => trigger()!.focus());
+    act(() => trigger()!.blur());
+    expect(popover()).toBeNull();
+  });
+
+  it('without timing there is no focusable trigger and no popover', () => {
+    show(response());
+    expect(trigger()).toBeNull();
+    act(() => time().dispatchEvent(new MouseEvent('mouseover', { bubbles: true })));
+    expect(popover()).toBeNull();
+  });
+});

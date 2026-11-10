@@ -55,6 +55,8 @@ function suggestedFileName(res: ResponseData): string {
   return segment.includes('.') ? segment : `${segment}.${ext}`;
 }
 
+const formatMs = (ms: number) => `${Math.round(ms)} ms`;
+
 interface ResponsePaneProps {
   onExpand?: () => void;
   onCollapse?: () => void;
@@ -68,6 +70,8 @@ export function ResponsePane({ onExpand, onCollapse, inModal }: ResponsePaneProp
   const setFullResponseBody = useApiStore((s) => s.setFullResponseBody);
   const setResponseModalOpen = useApiStore((s) => s.setResponseModalOpen);
   const res = tab.response;
+  const timing = res?.timing;
+  const [timingOpen, setTimingOpen] = useState(false);
   const [typeLang, setTypeLang] = useState<TypeLang>('typescript');
   const [bodyView, setBodyView] = useState<'pretty' | 'raw'>('pretty');
   const [bodySearch, setBodySearch] = useState('');
@@ -158,8 +162,45 @@ export function ResponsePane({ onExpand, onCollapse, inModal }: ResponsePaneProp
           <span>{res ? `${res.status} ${res.statusText}` : 'Waiting for request...'}</span>
         </div>
         <div className="metrics">
-          <div>
-            Time: <span className="value">{res?.timeTaken || '-'}</span> ms
+          <div
+            className="metric-time"
+            onMouseEnter={() => setTimingOpen(true)}
+            onMouseLeave={() => setTimingOpen(false)}
+          >
+            Time:{' '}
+            {timing ? (
+              <span
+                className="value timing-trigger"
+                tabIndex={0}
+                aria-describedby={timingOpen ? 'response-timing-popover' : undefined}
+                onFocus={() => setTimingOpen(true)}
+                onBlur={() => setTimingOpen(false)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') setTimingOpen(false);
+                }}
+              >
+                {res?.timeTaken || '-'}
+              </span>
+            ) : (
+              <span className="value">{res?.timeTaken || '-'}</span>
+            )}{' '}
+            ms
+            {timing && timingOpen && (
+              <div className="timing-popover" id="response-timing-popover" role="tooltip">
+                <span>Time to first byte</span>
+                <span>{formatMs(timing.ttfbMs)}</span>
+                <span>Download</span>
+                <span>{formatMs(Math.max(0, timing.totalMs - timing.ttfbMs))}</span>
+                <span>Total</span>
+                <span>{formatMs(timing.totalMs)}</span>
+                {res?.httpVersion && (
+                  <>
+                    <span>HTTP version</span>
+                    <span>{res.httpVersion}</span>
+                  </>
+                )}
+              </div>
+            )}
           </div>
           <div>
             Size: <span className="value">{res ? formatSize(res.size) : '-'}</span>
