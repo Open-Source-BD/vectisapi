@@ -16,6 +16,7 @@ struct Pooled {
     timeout_ms: u64,
     /// Redirect cap when following is on; `None` when redirects are returned as-is.
     max_redirects: Option<usize>,
+    verify_tls: bool,
     /// Set when the settings could not be applied (e.g. a bad proxy URL); sends fail with it.
     build_error: Option<String>,
 }
@@ -52,6 +53,11 @@ impl ClientPool {
         self.inner.read().max_redirects
     }
 
+    /// Whether TLS certificates are verified (used by clients that cannot share `client()`).
+    pub(crate) fn verify_tls(&self) -> bool {
+        self.inner.read().verify_tls
+    }
+
     pub(crate) fn check(&self) -> Result<(), CoreError> {
         match &self.inner.read().build_error {
             Some(msg) => Err(CoreError::new(ErrorKind::Other, msg.clone())),
@@ -69,6 +75,7 @@ fn build(settings: &Settings) -> Pooled {
         client,
         timeout_ms: settings.timeout_ms,
         max_redirects: settings.follow_redirects.then_some(settings.max_redirects),
+        verify_tls: settings.verify_tls,
         build_error,
     }
 }

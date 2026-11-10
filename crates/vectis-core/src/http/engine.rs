@@ -228,7 +228,7 @@ impl Drop for Registration<'_> {
 
 /// The next URL when `response` is a followable redirect (301/302/303/307/308 with a usable
 /// `Location`, resolved against `current`); otherwise the response is final.
-fn redirect_target(response: &reqwest::Response, current: &Url) -> Option<Url> {
+pub(crate) fn redirect_target(response: &reqwest::Response, current: &Url) -> Option<Url> {
     if !matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308) {
         return None;
     }
@@ -240,7 +240,7 @@ fn redirect_target(response: &reqwest::Response, current: &Url) -> Option<Url> {
 /// Removes headers that must not follow a redirect from `prev` to `next`: `Authorization` when
 /// the host changes or https downgrades to http (no token leaks; curl and browsers do the same),
 /// and a user-set `Host` when the host changes. `Proxy-Authorization` targets the proxy and stays.
-fn strip_on_hop(prev: &Url, next: &Url, headers: &mut HeaderMap) {
+pub(crate) fn strip_on_hop(prev: &Url, next: &Url, headers: &mut HeaderMap) {
     let host_changed = prev.host_str() != next.host_str();
     let downgraded = prev.scheme() == "https" && next.scheme() == "http";
     if host_changed || downgraded {
@@ -251,7 +251,7 @@ fn strip_on_hop(prev: &Url, next: &Url, headers: &mut HeaderMap) {
     }
 }
 
-fn parse_url(raw: &str) -> Result<Url, CoreError> {
+pub(crate) fn parse_url(raw: &str) -> Result<Url, CoreError> {
     let invalid = |reason: &str| {
         CoreError::new(
             ErrorKind::InvalidUrl,
@@ -270,7 +270,10 @@ fn parse_url(raw: &str) -> Result<Url, CoreError> {
 
 /// Builds the header map with `append`, keeping order and duplicates. For multipart bodies the
 /// user's Content-Type is dropped: the boundary must come from the generated form.
-fn build_headers(pairs: &[(String, String)], is_multipart: bool) -> Result<HeaderMap, CoreError> {
+pub(crate) fn build_headers(
+    pairs: &[(String, String)],
+    is_multipart: bool,
+) -> Result<HeaderMap, CoreError> {
     let mut headers = HeaderMap::with_capacity(pairs.len());
     for (name, value) in pairs {
         let name = name.trim();
@@ -291,7 +294,7 @@ fn build_headers(pairs: &[(String, String)], is_multipart: bool) -> Result<Heade
     Ok(headers)
 }
 
-async fn attach_body(
+pub(crate) async fn attach_body(
     request: RequestBuilder,
     body: &BodySpec,
     has_content_type: bool,
