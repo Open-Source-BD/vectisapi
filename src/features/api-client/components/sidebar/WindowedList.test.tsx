@@ -1,15 +1,36 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { WindowedList } from './WindowedList';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+/** Captures observers so a test can report measured sizes. */
+class FakeResizeObserver {
+  static all: FakeResizeObserver[] = [];
+  constructor(private cb: ResizeObserverCallback) {
+    FakeResizeObserver.all.push(this);
+  }
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+  fire(targets: Element[]) {
+    this.cb(targets.map((target) => ({ target }) as ResizeObserverEntry), this as never);
+  }
+}
+
 describe('WindowedList', () => {
   let root: Root | undefined;
-  afterEach(() => act(() => root?.unmount()));
+  beforeEach(() => {
+    FakeResizeObserver.all = [];
+    vi.stubGlobal('ResizeObserver', FakeResizeObserver);
+  });
+  afterEach(() => {
+    act(() => root?.unmount());
+    vi.unstubAllGlobals();
+  });
 
-  it('renders only the visible rows of 10,000 and keeps total height', () => {
+  it('windows 10,000 mixed-height rows and shifts followers when a measured height changes', () => {
     const items = Array.from({ length: 10_000 }, (_, i) => i);
     const host = document.createElement('div');
     root = createRoot(host);
@@ -17,7 +38,7 @@ describe('WindowedList', () => {
       root!.render(
         <WindowedList
           items={items}
-          heightOf={() => 40}
+          estimateHeight={(n) => (n % 10 === 0 ? 25 : 34)}
           keyOf={String}
           renderItem={(n) => <span className="row">{n}</span>}
           overscan={2}
@@ -25,20 +46,25 @@ describe('WindowedList', () => {
         />,
       ),
     );
-    const rows = host.querySelectorAll('.row');
-    expect(rows.length).toBeLessThan(20);
-    expect(rows[0].textContent).toBe('0');
-
+    expect(host.querySelectorAll('.row').length).toBeLessThan(25);
     const scroller = host.firstElementChild as HTMLElement;
-    scroller.scrollTop = 40 * 5000;
+    const rowsObserver = FakeResizeObserver.all[1];
+
+    // Row 1 turns out to be 100px tall.
+    const wrapper = host.querySelector('[data-key="1"]') as HTMLElement;
+    Object.defineProperty(wrapper, 'offsetHeight', { configurable: true, value: 100 });
+    act(() => rowsObserver.fire([wrapper]));
+
+    scroller.scrollTop = 50_000;
     act(() => {
       scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
     });
-    const after = [...host.querySelectorAll('.row')].map((r) => Number(r.textContent));
-    expect(after.length).toBeLessThan(20);
-    expect(after).toContain(5000);
-    const spacers = [...scroller.children].filter((c) => !c.querySelector('.row')) as HTMLElement[];
-    const total = spacers.reduce((n, el) => n + parseFloat(el.style.height), 0) + after.length * 40;
-    expect(total).toBe(400_000);
+    const rendered = [...host.querySelectorAll('.row')].map((r) => Number(r.textContent));
+    expect(rendered.length).toBeLessThan(25);
+    const first = rendered[0];
+    const estimated = (n: number) => (n % 10 === 0 ? 25 : 34);
+    let expectedTop = 0;
+    for (let i = 0; i < first; i++) expectedTop += i === 1 ? 100 : estimated(i);
+    expect(parseFloat((scroller.firstElementChild as HTMLElement).style.height)).toBe(expectedTop);
   });
 });

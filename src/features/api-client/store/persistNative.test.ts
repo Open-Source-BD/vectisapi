@@ -170,6 +170,25 @@ describe('startPersistence', () => {
     stop();
   });
 
+  it('continuous edits still write within max wait', async () => {
+    const stop = await startPersistence();
+    const c = col('a');
+    for (let i = 1; i <= 30; i++) {
+      useApiStore.setState({ collections: [{ ...c, name: `n${i}` } as never] });
+      await vi.advanceTimersByTimeAsync(100);
+    }
+    expect(mockSave.mock.calls.length).toBeGreaterThanOrEqual(2);
+    stop();
+  });
+
+  it('stop flushes pending ops', async () => {
+    const stop = await startPersistence();
+    useApiStore.setState({ environments: [env('e9')] });
+    stop();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mockSave).toHaveBeenCalledTimes(1);
+  });
+
   it('flush on close writes pending entities then reports flush_done', async () => {
     const stop = await startPersistence();
     useApiStore.setState({ environments: [env('e1')] });

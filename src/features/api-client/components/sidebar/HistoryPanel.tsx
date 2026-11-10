@@ -7,13 +7,13 @@ import { WindowedList } from './WindowedList';
 
 const SEARCH_DEBOUNCE_MS = 150;
 const DEFAULT_SEARCH_LIMIT = 1000;
-/** Pixel heights of the two row kinds; rows are fixed so the list can be windowed. */
-const LABEL_HEIGHT = 28;
-const ROW_HEIGHT = 40;
+/** Estimates for rows not yet measured (natural CSS sizes at rest). */
+const LABEL_ESTIMATE = 25;
+const ROW_ESTIMATE = 34;
 
 type Row = { kind: 'label'; label: string } | { kind: 'item'; item: HistoryItem };
 
-const rowHeight = (row: Row) => (row.kind === 'label' ? LABEL_HEIGHT : ROW_HEIGHT);
+const rowEstimate = (row: Row) => (row.kind === 'label' ? LABEL_ESTIMATE : ROW_ESTIMATE);
 const rowKey = (row: Row) => (row.kind === 'label' ? `label:${row.label}` : row.item.id);
 
 export function HistoryPanel() {
@@ -122,19 +122,15 @@ export function HistoryPanel() {
         <WindowedList
           className="tree-scroll"
           items={rows}
-          heightOf={rowHeight}
+          estimateHeight={rowEstimate}
           keyOf={rowKey}
           renderItem={(row) =>
             row.kind === 'label' ? (
-              <div className="history-group-label" style={{ height: LABEL_HEIGHT, boxSizing: 'border-box' }}>
+              <div className="history-group-label">
                 {row.label}
               </div>
             ) : (
-              <div
-                className="history-row"
-                style={{ height: ROW_HEIGHT, boxSizing: 'border-box' }}
-                onClick={() => replayHistory(row.item)}
-              >
+              <div className="history-row" onClick={() => replayHistory(row.item)}>
                 <span className={`h-method collection-method ${row.item.method.toLowerCase()}`}>{row.item.method}</span>
                 <span className="h-url">{row.item.url}</span>
                 <span className="h-status">{row.item.status || '—'}</span>

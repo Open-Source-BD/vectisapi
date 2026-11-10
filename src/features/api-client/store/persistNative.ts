@@ -12,6 +12,8 @@ import { useApiStore } from './useApiStore';
 
 /** Quiet period after the last change to an entity before it is written. */
 const DEBOUNCE_MS = 300;
+/** Longest an entity's first unsaved change may wait, however steadily it keeps changing. */
+const MAX_WAIT_MS = 1000;
 
 /** Stable identity of the entity an op writes; later ops for the same key replace earlier ones. */
 function opKey(op: EntityOp): string {
@@ -87,6 +89,7 @@ export function diffToOps(prev: StoreState, next: StoreState): EntityOp[] {
 }
 
 const pending = new Map<string, EntityOp>();
+const firstPendingAt = new Map<string, number>();
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 const inflight = new Set<Promise<void>>();
 
@@ -102,14 +105,18 @@ function schedule(op: EntityOp): void {
   const key = opKey(op);
   pending.set(key, op);
   clearTimeout(timers.get(key));
+  const now = Date.now();
+  if (!firstPendingAt.has(key)) firstPendingAt.set(key, now);
+  const delay = Math.max(0, Math.min(DEBOUNCE_MS, firstPendingAt.get(key)! + MAX_WAIT_MS - now));
   timers.set(
     key,
     setTimeout(() => {
       timers.delete(key);
+      firstPendingAt.delete(key);
       const queued = pending.get(key);
       pending.delete(key);
       if (queued) send([queued]);
-    }, DEBOUNCE_MS),
+    }, delay),
   );
 }
 
@@ -117,6 +124,7 @@ function schedule(op: EntityOp): void {
 export async function flushNow(): Promise<void> {
   for (const timer of timers.values()) clearTimeout(timer);
   timers.clear();
+  firstPendingAt.clear();
   const ops = [...pending.values()];
   pending.clear();
   send(ops);
@@ -169,6 +177,7 @@ export async function startPersistence(): Promise<() => void> {
     stopped = true;
     unsub();
     unlisten?.();
+    void flushNow(); // don't drop edits still waiting on their debounce
   };
 }
 
