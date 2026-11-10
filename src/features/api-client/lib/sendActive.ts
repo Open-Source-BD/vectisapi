@@ -29,7 +29,19 @@ export async function executeActiveSend(): Promise<void> {
   const result = await executeRequest(tab, vars, { onSetVar: state.setEnvVar });
 
   if (result.error?.phase === 'pre-request') {
-    alert('Pre-request Script Error:\n' + result.error.message);
+    state.updateActiveTab({
+      response: {
+        ok: false,
+        status: 0,
+        statusText: 'Script Error',
+        timeTaken: 0,
+        size: 0,
+        rawText: result.error.message,
+        headers: {},
+        testResults: [],
+      },
+      activeResTab: 'body',
+    });
     state.setIsLoading(false);
     return;
   }

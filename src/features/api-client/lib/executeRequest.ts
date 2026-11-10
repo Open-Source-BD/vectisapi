@@ -1,5 +1,5 @@
 import type { EnvVar, ResponseData, TabState } from '../types';
-import { PmSandbox } from './pmSandbox';
+import { runScript } from './scriptHost';
 import { generateId } from './id';
 import { buildRequestSpec } from './native/buildRequestSpec';
 import { decodeText, toNativeError, toResponseData } from './native/decodeResponse';
@@ -50,16 +50,23 @@ export async function executeRequest(
   seedVars: EnvVar[],
   opts: ExecuteOptions = {},
 ): Promise<ExecuteResult> {
-  const sandbox = new PmSandbox(seedVars, opts.onSetVar ?? (() => {}), opts.iterationData);
+  const onSetVar = opts.onSetVar ?? (() => {});
+  const iterationData = opts.iterationData;
+  // Same seeding as PmSandbox: env/globals first, iteration data on top.
+  let vars: Record<string, string> = {};
+  for (const v of seedVars) if (v.key) vars[v.key] = v.value;
+  Object.assign(vars, iterationData);
 
-  try {
-    sandbox.runPreRequest(tab.scripts);
-  } catch (e) {
-    return { response: null, error: { phase: 'pre-request', message: (e as Error).message } };
+  const pre = await runScript({ phase: 'pre', code: tab.scripts, vars, iterationData });
+  pre.setVars.forEach(([k, v]) => onSetVar(k, v));
+  if (pre.error) {
+    return { response: null, error: { phase: 'pre-request', message: pre.error } };
   }
+  vars = pre.vars;
 
   // Read vars AFTER the pre-request script so its mutations drive interpolation.
-  const spec = buildRequestSpec(tab, sandbox.currentVars(), generateId(), opts.timeoutMs);
+  const currentVars: EnvVar[] = Object.entries(vars).map(([key, value]) => ({ id: `v:${key}`, key, value }));
+  const spec = buildRequestSpec(tab, currentVars, generateId(), opts.timeoutMs);
   const fail = (kind: string, message: string): ExecuteResult => ({
     response: errorResponse(kind, message),
     finalUrl: spec.url,
@@ -95,9 +102,19 @@ export async function executeRequest(
         }
       }
       if (signal?.aborted) return fail('cancelled', 'Request cancelled');
-      sandbox.attachResponse(data.status, data.statusText, testBody);
-      sandbox.runTests(tab.tests);
-      return { response: { ...data, testResults: sandbox.testResults }, finalUrl: spec.url };
+      const post = await runScript({
+        phase: 'test',
+        code: tab.tests,
+        vars,
+        iterationData,
+        response: { code: data.status, status: data.statusText, body: testBody },
+      });
+      if (signal?.aborted) return fail('cancelled', 'Request cancelled');
+      post.setVars.forEach(([k, v]) => onSetVar(k, v));
+      const testResults = post.error
+        ? [...post.testResults, { name: 'Script Error', pass: false, error: post.error }]
+        : post.testResults;
+      return { response: { ...data, testResults }, finalUrl: spec.url };
     } catch (e) {
       const { kind, message } = toNativeError(e);
       return fail(kind, message);

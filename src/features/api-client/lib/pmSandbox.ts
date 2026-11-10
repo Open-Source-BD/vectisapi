@@ -28,6 +28,15 @@ export interface Pm {
 }
 
 /**
+ * Compile a user script. `window`/`document` are shadowed so scripts see the same
+ * (absent) DOM whether they run in the worker or, under tests, on the main thread.
+ */
+function compile(src: string): (pm: Pm) => void {
+  const fn = new Function('pm', 'window', 'document', src);
+  return (pm) => fn(pm, undefined, undefined);
+}
+
+/**
  * Encapsulates the Postman-like `pm` sandbox used for pre-request and test
  * scripts. Scripts run via `new Function('pm', src)` exactly as before.
  */
@@ -101,7 +110,7 @@ export class PmSandbox {
   /** Run a pre-request script. Throws if the script throws. */
   runPreRequest(script: string): void {
     if (!script) return;
-    new Function('pm', script)(this.pm);
+    compile(script)(this.pm);
   }
 
   /** Attach the response object so test scripts can read `pm.response`. */
@@ -124,7 +133,7 @@ export class PmSandbox {
   runTests(script: string): void {
     if (!script) return;
     try {
-      new Function('pm', script)(this.pm);
+      compile(script)(this.pm);
     } catch (e) {
       this.testResults.push({ name: 'Script Error', pass: false, error: (e as Error).message });
     }

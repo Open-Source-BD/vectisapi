@@ -118,16 +118,17 @@ describe('executeActiveSend', () => {
   it('handles pre-request error', async () => {
     const mockExec = executeRequest as ReturnType<typeof vi.fn>;
     mockExec.mockResolvedValue({ error: { phase: 'pre-request', message: 'SyntaxError' } });
-    const alertSpy = vi.fn();
-    vi.stubGlobal('alert', alertSpy);
 
     const state = mockState();
     mockGetState.mockReturnValue(state);
 
     await executeActiveSend();
     expect(state.setIsLoading).toHaveBeenCalledWith(false);
-    expect(state.updateActiveTab).not.toHaveBeenCalled();
-    expect(alertSpy).toHaveBeenCalledOnce();
+    expect(state.updateActiveTab).toHaveBeenCalledWith(
+      expect.objectContaining({
+        response: expect.objectContaining({ status: 0, statusText: 'Script Error', rawText: 'SyntaxError' }),
+      }),
+    );
   });
 
   it('writes error response when request fails', async () => {

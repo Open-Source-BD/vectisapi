@@ -8,6 +8,7 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
+    setupFiles: ['@vitest/web-worker'],
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
   },
 });
