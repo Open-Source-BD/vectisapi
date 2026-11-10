@@ -104,6 +104,42 @@ describe('ResponsePane large bodies', () => {
     expect(host.querySelector('[role="alert"]')).toBeNull(); // cancel is a no-op
   });
 
+  it('looks up content-type case-insensitively for the suggested name', async () => {
+    mockSave.mockResolvedValue(null);
+    show(response({ finalUrl: 'https://api.test/', headers: { 'Content-Type': 'Application/JSON' } }));
+    await act(async () => button(/Download/)!.click());
+    expect(mockSave).toHaveBeenCalledWith('r1', 'response.json');
+  });
+
+  it('Load full body shows a loading state, then an inline error when the fetch fails', async () => {
+    let reject!: (e: unknown) => void;
+    mockGetBody.mockImplementation(() => new Promise((_, r) => (reject = r)));
+    show(response({ truncated: true, size: 3_000_000, rawText: '{"a":' }));
+    await act(async () => button(/^Load full body/)!.click());
+    const loadingBtn = button('Loading…');
+    expect(loadingBtn).toBeDefined();
+    expect(loadingBtn!.disabled).toBe(true);
+
+    await act(async () => reject({ kind: 'other', message: 'Response body no longer available' }));
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe('Response body no longer available');
+    expect(button(/^Load full body/)!.disabled).toBe(false);
+    const res = selectActiveTab(useApiStore.getState()).response!;
+    expect(res.truncated).toBe(true);
+    expect(res.rawText).toBe('{"a":');
+  });
+
+  it('a loaded large JSON body opens the tree collapsed below the root', async () => {
+    const big = JSON.stringify(Array.from({ length: 30_000 }, (_, i) => ({ id: i, name: `n${i}` })));
+    mockGetBody.mockResolvedValue(new TextEncoder().encode(big));
+    show(response({ truncated: true, size: big.length, rawText: big.slice(0, 100) }));
+    await act(async () => button(/^Load full body/)!.click());
+    const branches = host.querySelectorAll('.jt-branch');
+    // Root is open (its children are listed), each child object is collapsed.
+    expect(host.querySelectorAll('.jt-collapsed').length).toBe(30_000);
+    expect(branches[0].querySelector('.jt-collapsed')).toBeNull();
+    expect(branches[0].querySelector('.jt-toggle')?.textContent).toBe('expand_more');
+  });
+
   it('shows an inline error when the stored body was evicted', async () => {
     mockSave.mockRejectedValue({ kind: 'other', message: 'Response body no longer available' });
     show(response());

@@ -72,6 +72,8 @@ export function JsonTree({ data, rawText, query, initiallyOpen = true }: JsonTre
           depth={0}
           isLast
           defaultOpen={defaultOpen}
+          // Collapsed-at-start (large bodies) still shows the root's children; "Collapse all" closes it.
+          startOpen={version === 0 && !initiallyOpen ? true : undefined}
         />
       </div>
     </div>
@@ -91,10 +93,12 @@ interface NodeProps {
   depth: number;
   isLast: boolean;
   defaultOpen: boolean;
+  /** Overrides `defaultOpen` for this node's initial state only. */
+  startOpen?: boolean;
 }
 
-function JsonNode({ keyName, value, depth, isLast, defaultOpen }: NodeProps) {
-  const [open, setOpen] = useState(defaultOpen);
+function JsonNode({ keyName, value, depth, isLast, defaultOpen, startOpen }: NodeProps) {
+  const [open, setOpen] = useState(startOpen ?? defaultOpen);
   const indent = { width: depth * 16 + 8 };
   const isContainer = value !== null && typeof value === 'object';
 

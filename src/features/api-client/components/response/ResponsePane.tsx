@@ -41,7 +41,9 @@ function extensionFor(contentType: string | undefined): string {
 
 /** Save-dialog default: the final URL's last path segment, else `response.<ext from content-type>`. */
 function suggestedFileName(res: ResponseData): string {
-  const ext = extensionFor(res.headers['content-type']);
+  // Native headers are lowercased by decodeResponse.joinHeaders; match case-insensitively anyway.
+  const ctKey = Object.keys(res.headers).find((k) => k.toLowerCase() === 'content-type');
+  const ext = extensionFor(ctKey === undefined ? undefined : res.headers[ctKey]);
   let segment = '';
   try {
     const raw = new URL(res.finalUrl ?? '').pathname.split('/').pop() ?? '';

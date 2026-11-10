@@ -56,6 +56,47 @@ describe('VirtualLines', () => {
     expect(bodyRows(host)).toHaveLength(4);
   });
 
+  it('compressed scroll range (>8M px): first visible row tracks the scroll fraction, last line reachable', () => {
+    const n = 500_000; // 500k × 20px = 10M px > 8M cap → compressed branch
+    const lines = Array.from({ length: n }, (_, i) => `l${i}`);
+    render(<VirtualLines lines={lines} />);
+    const scroller = host.querySelector('.code-scroll')!;
+    const spacers = () => host.querySelectorAll<HTMLElement>('.code-gutter > div:not([style*="height: 20px"])');
+    const scrollTo = (y: number) => {
+      scroller.scrollTop = y;
+      act(() => {
+        scroller.dispatchEvent(new Event('scroll'));
+      });
+    };
+    const viewport = 600; // fallbackHeight in jsdom
+    const contentHeight = 8_000_000;
+    const visible = viewport / 20;
+    const maxTop = contentHeight - viewport;
+    // Rendered content (spacers + rows) always equals the compressed height.
+    const total = () => {
+      const [top, bottom] = [...spacers()].map((d) => parseFloat(d.style.height));
+      return { top, bottom, rows: gutterRows(host).length };
+    };
+
+    for (const frac of [0.5, 0.25]) {
+      const y = Math.round(maxTop * frac);
+      scrollTo(y);
+      const { top, bottom, rows } = total();
+      expect(top + rows * 20 + bottom).toBe(contentHeight);
+      // The row drawn at pixel `y` is the first visible one.
+      const firstVisible = Number(gutterRows(host)[(y - top) / 20].textContent) - 1;
+      expect(Math.abs(firstVisible - frac * (n - visible))).toBeLessThanOrEqual(1);
+    }
+
+    scrollTo(maxTop);
+    const { top, bottom, rows } = total();
+    const nums = [...gutterRows(host)].map((r) => Number(r.textContent));
+    expect(nums[nums.length - 1]).toBe(n);
+    expect(bottom).toBe(0);
+    // The last row's bottom edge sits exactly at the viewport's bottom edge.
+    expect(top + rows * 20).toBe(maxTop + viewport);
+  });
+
   // Soft perf check (jsdom timing varies by machine). Skipped in CI; run locally.
   it.skipIf(!!process.env.CI)('PERF (soft, skipped in CI): 1,000,000 lines mount < 200 rows in < 50 ms', () => {
     const lines = Array.from({ length: 1_000_000 }, (_, i) => `{"id": ${i}}`);
