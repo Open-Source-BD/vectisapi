@@ -82,9 +82,10 @@ export function RealtimePane({ send }: Props) {
         </div>
       ) : (
         <>
-          {trimmed > 0 && <div className="rt-trim">… {trimmed} older messages trimmed</div>}
           <WindowedList
             className="rt-log"
+            aria-live="polite"
+            header={trimmed > 0 ? <div className="rt-trim">… {trimmed} older messages trimmed</div> : undefined}
             items={messages}
             estimateHeight={estimateRow}
             keyOf={messageKey}

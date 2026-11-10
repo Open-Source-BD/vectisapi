@@ -48,7 +48,7 @@ describe('realtimeConnection', () => {
   it('openWebSocket passes headers and protocols to rt_open_ws', () => {
     openWebSocket('t1', 'wss://x', ['graphql-ws'], handlers(), [['Authorization', 'Bearer T']]);
     expect(native.rtOpenWs).toHaveBeenCalledWith(
-      't1',
+      expect.stringMatching(/^t1:\d+$/),
       'wss://x',
       [['Authorization', 'Bearer T']],
       ['graphql-ws'],
@@ -58,7 +58,7 @@ describe('realtimeConnection', () => {
 
   it('headers default to none', () => {
     openWebSocket('t1', 'wss://x', [], handlers());
-    expect(native.rtOpenWs.mock.calls[0].slice(0, 4)).toEqual(['t1', 'wss://x', [], []]);
+    expect(native.rtOpenWs.mock.calls[0].slice(0, 4)).toEqual([expect.stringMatching(/^t1:/), 'wss://x', [], []]);
   });
 
   it('events map to RtHandlers', () => {
@@ -95,7 +95,7 @@ describe('realtimeConnection', () => {
     const h = handlers();
     const spec = { requestId: 't1', method: 'GET', url: 'https://x/s' } as HttpRequestSpec;
     openSse('t1', spec, 'abc', h);
-    expect(native.rtOpenSse).toHaveBeenCalledWith('t1', spec, 'abc', expect.any(Function));
+    expect(native.rtOpenSse).toHaveBeenCalledWith(expect.stringMatching(/^t1:/), spec, 'abc', expect.any(Function));
     sseSink()({ type: 'open' });
     sseSink()({ type: 'sseEvent', event: 'message', data: 'hi', id: '7' });
     sseSink()({ type: 'sseEvent', event: 'tick', data: 'é', id: null });
@@ -113,7 +113,7 @@ describe('realtimeConnection', () => {
     expect(sendWebSocket('t1', 'a')).toBe(false); // still connecting
     wsSink()({ type: 'open' });
     expect(sendWebSocket('t1', 'a')).toBe(true);
-    expect(native.rtSend).toHaveBeenCalledWith('t1', 'a');
+    expect(native.rtSend).toHaveBeenCalledWith(native.rtOpenWs.mock.calls[0][0], 'a');
   });
 
   it('is idempotent — a second connect does not open a second connection', () => {
@@ -129,11 +129,22 @@ describe('realtimeConnection', () => {
     closeConnection('t1');
     closeConnection('t1');
     expect(native.rtClose).toHaveBeenCalledTimes(1);
-    expect(native.rtClose).toHaveBeenCalledWith('t1');
+    expect(native.rtClose).toHaveBeenCalledWith(native.rtOpenWs.mock.calls[0][0]);
     wsSink()({ type: 'closed', code: 1006, reason: 'late' });
     wsSink()({ type: 'message', text: 'ghost', bytes: 5, binary: false });
     expect(names(h)).toEqual(['connecting', 'open']);
     expect(h.messages).toHaveLength(0);
+  });
+
+  it('reconnect immediately after close opens a new rust connection', () => {
+    openWebSocket('t1', 'wss://x', [], handlers());
+    closeConnection('t1');
+    openWebSocket('t1', 'wss://x', [], handlers());
+    const [first, second] = native.rtOpenWs.mock.calls.map((c) => c[0]);
+    expect(native.rtOpenWs).toHaveBeenCalledTimes(2);
+    expect(second).not.toBe(first);
+    expect(native.rtClose).toHaveBeenCalledWith(first);
+    expect(native.rtClose).not.toHaveBeenCalledWith(second);
   });
 
   it('stale generation ignored after reconnect', () => {

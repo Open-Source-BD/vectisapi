@@ -7,6 +7,9 @@ interface Props<T> {
   keyOf: (item: T) => string;
   renderItem: (item: T) => ReactNode;
   className?: string;
+  /** Content shown at the top of the scroll area, above the rows. */
+  header?: ReactNode;
+  'aria-live'?: 'polite' | 'assertive' | 'off';
   /** Extra rows rendered above and below the viewport. */
   overscan?: number;
   /** Viewport height assumed until the element has been measured. */
@@ -25,6 +28,8 @@ export function WindowedList<T>({
   keyOf,
   renderItem,
   className,
+  header,
+  'aria-live': ariaLive,
   overscan = 8,
   fallbackHeight = 600,
 }: Props<T>) {
@@ -65,6 +70,17 @@ export function WindowedList<T>({
     if (node) rowObserver.current?.observe(node);
   }, []);
 
+  // Forget heights of rows that have left `items` (e.g. a capped log) so the cache stays bounded.
+  // Adjusting state during render (vs. in an effect) avoids a frame with stale offsets.
+  const [prunedFor, setPrunedFor] = useState(items);
+  if (prunedFor !== items) {
+    setPrunedFor(items);
+    const live = new Set(items.map(keyOf));
+    if (heights.size > 0 && [...heights.keys()].some((k) => !live.has(k))) {
+      setHeights(new Map([...heights].filter(([k]) => live.has(k))));
+    }
+  }
+
   // offsets[i] = top of item i; offsets[n] = total height.
   const offsets = useMemo(() => {
     const out = new Array<number>(items.length + 1);
@@ -90,7 +106,8 @@ export function WindowedList<T>({
   end = Math.min(items.length, end + overscan);
 
   return (
-    <div ref={ref} className={className} onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}>
+    <div ref={ref} className={className} onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)} aria-live={ariaLive}>
+      {header}
       <div style={{ height: offsets[start] }} />
       {items.slice(start, end).map((item) => {
         const key = keyOf(item);

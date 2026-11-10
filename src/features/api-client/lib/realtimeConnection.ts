@@ -17,6 +17,8 @@ export interface RtHandlers {
 
 interface LiveConn {
   gen: number;
+  /** Rust-side connection id, unique per generation so a reconnect never collides with a closing one. */
+  rustId: string;
   open: boolean;
 }
 
@@ -66,12 +68,13 @@ function start(
   tabId: string,
   handlers: RtHandlers,
   sse: boolean,
-  open: (onEvent: (e: RtEvent) => void) => Promise<void>,
+  open: (rustId: string, onEvent: (e: RtEvent) => void) => Promise<void>,
 ): void {
   const gen = ++genCounter;
-  conns.set(tabId, { gen, open: false });
+  const rustId = `${tabId}:${gen}`;
+  conns.set(tabId, { gen, rustId, open: false });
   handlers.onStatus('connecting');
-  open(eventHandler(tabId, gen, handlers, sse)).catch((e: unknown) => {
+  open(rustId, eventHandler(tabId, gen, handlers, sse)).catch((e: unknown) => {
     if (conns.get(tabId)?.gen !== gen) return;
     conns.delete(tabId);
     handlers.onStatus('error', errorMessage(e));
@@ -92,7 +95,7 @@ export function openWebSocket(
   headers: [string, string][] = [],
 ): void {
   if (isConnected(tabId)) return;
-  start(tabId, handlers, false, (onEvent) => rtOpenWs(tabId, url, headers, protocols, onEvent));
+  start(tabId, handlers, false, (rustId, onEvent) => rtOpenWs(rustId, url, headers, protocols, onEvent));
 }
 
 /** Send text on an open socket. Returns false if not open. */
@@ -100,7 +103,7 @@ export function sendWebSocket(tabId: string, text: string): boolean {
   const c = conns.get(tabId);
   if (!c?.open) return false;
   const gen = c.gen;
-  rtSend(tabId, text).catch((e: unknown) => {
+  rtSend(c.rustId, text).catch((e: unknown) => {
     // A failed send means the socket is going away; Rust reports that as the terminal event.
     if (conns.get(tabId)?.gen === gen) console.warn('rt_send failed', e);
   });
@@ -109,8 +112,10 @@ export function sendWebSocket(tabId: string, text: string): boolean {
 
 /** Manually close a connection (WS or SSE). Invalidates callbacks via map removal. */
 export function closeConnection(tabId: string): void {
-  if (!conns.delete(tabId)) return;
-  rtClose(tabId).catch(() => {
+  const c = conns.get(tabId);
+  if (!c) return;
+  conns.delete(tabId);
+  rtClose(c.rustId).catch(() => {
     // already closed on the Rust side
   });
 }
@@ -118,7 +123,7 @@ export function closeConnection(tabId: string): void {
 /** Open an SSE stream for a tab; the full request (any body kind) is sent by the Rust engine. */
 export function openSse(tabId: string, spec: HttpRequestSpec, lastEventId: string | null, handlers: RtHandlers): void {
   if (isConnected(tabId)) return;
-  start(tabId, handlers, true, (onEvent) => rtOpenSse(tabId, spec, lastEventId, onEvent));
+  start(tabId, handlers, true, (rustId, onEvent) => rtOpenSse(rustId, spec, lastEventId, onEvent));
 }
 
 export function byteLen(s: string): number {

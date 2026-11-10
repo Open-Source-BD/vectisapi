@@ -70,4 +70,39 @@ describe('WindowedList', () => {
     for (let i = 0; i < first; i++) expectedTop += i === 1 ? 100 : estimated(i);
     expect(parseFloat((scroller.firstElementChild as HTMLElement).style.height)).toBe(expectedTop);
   });
+
+  it('forgets measured heights of rows that left items', () => {
+    const host = document.createElement('div');
+    root = createRoot(host);
+    const estimate = () => 30;
+    const render = (items: number[]) =>
+      act(() =>
+        root!.render(
+          <WindowedList
+            items={items}
+            estimateHeight={estimate}
+            keyOf={String}
+            renderItem={(n) => <span className="row">{n}</span>}
+            overscan={0}
+            fallbackHeight={50}
+          />,
+        ),
+      );
+    const all = Array.from({ length: 10 }, (_, i) => i);
+    render(all);
+    const rowsObserver = FakeResizeObserver.all[1];
+    const wrapper = host.querySelector('[data-key="1"]') as HTMLElement;
+    Object.defineProperty(wrapper, 'offsetHeight', { configurable: true, value: 100 });
+    act(() => rowsObserver.fire([wrapper]));
+
+    render(all.filter((n) => n !== 1)); // row 1 leaves: its cached height must be dropped
+    render(all); // and returns unmeasured: the estimate applies, not the stale 100
+    const scroller = host.firstElementChild as HTMLElement;
+    scroller.scrollTop = 200;
+    act(() => {
+      scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
+    });
+    // With 30px rows, scrollTop 200 starts at row 6 -> 180px above it (a stale 100px row 1 would give 150).
+    expect(parseFloat((scroller.firstElementChild as HTMLElement).style.height)).toBe(180);
+  });
 });

@@ -31,7 +31,7 @@ describe('closing tabs closes their connection', () => {
     useApiStore.getState().wsConnect(a.id);
     expect(native.rtOpenWs).toHaveBeenCalledTimes(1);
     useApiStore.getState().closeTab(a.id);
-    expect(native.rtClose).toHaveBeenCalledWith(a.id);
+    expect(native.rtClose).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`^${a.id}:`)));
   });
 
   it('closing the last tab (replacement path) closes the old tab id', () => {
@@ -39,7 +39,7 @@ describe('closing tabs closes their connection', () => {
     useApiStore.setState({ tabs: [{ ...a, protocol: 'ws', url: 'wss://x' }] });
     useApiStore.getState().wsConnect(a.id);
     useApiStore.getState().closeTab(a.id);
-    expect(native.rtClose).toHaveBeenCalledWith(a.id);
+    expect(native.rtClose).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`^${a.id}:`)));
     expect(useApiStore.getState().tabs[0].id).not.toBe(a.id);
   });
 
@@ -93,7 +93,7 @@ describe('closing tabs closes their connection', () => {
     });
     useApiStore.getState().sseConnect(a.id);
     const [id, spec, last] = native.rtOpenSse.mock.calls[0];
-    expect(id).toBe(a.id);
+    expect(id).toMatch(new RegExp(`^${a.id}:`));
     expect(spec.body).toEqual({ type: 'multipart', value: [{ name: 'k', value: { type: 'text', value: 'v' } }] });
     expect(last).toBe('42');
   });
