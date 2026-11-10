@@ -18,6 +18,7 @@ use crate::error::{CoreError, ErrorKind};
 use crate::settings::Settings;
 
 pub use migrations::SCHEMA_VERSION;
+pub use repo::{clamp_history_limit, MAX_HISTORY_LIMIT, MIN_HISTORY_LIMIT};
 
 impl From<rusqlite::Error> for CoreError {
     fn from(err: rusqlite::Error) -> Self {

@@ -1,7 +1,7 @@
 use std::time::Instant;
 
 use serde_json::{json, Value};
-use vectis_core::db::{Db, EntityOp, SCHEMA_VERSION};
+use vectis_core::db::{clamp_history_limit, Db, EntityOp, SCHEMA_VERSION};
 
 fn item(id: &str, method: &str, url: &str) -> String {
     json!({"id": id, "method": method, "url": url, "status": 200, "time": 12.5, "date": "x"})
@@ -173,7 +173,7 @@ async fn history_search_handles_hostile_input_and_prefixes() {
     ] {
         db.search_history(q.into(), 10).await.unwrap();
     }
-    assert_eq!(db.search_history(String::new(), 1).await.unwrap().len(), 1);
+    assert_eq!(db.search_history(String::new(), 1).await.unwrap().len(), 2);
 }
 
 #[tokio::test]
@@ -356,5 +356,52 @@ async fn settings_missing_or_invalid_fall_back_to_default() {
     assert_eq!(
         db.load_workspace().await.unwrap().settings,
         Default::default()
+    );
+}
+
+#[tokio::test]
+async fn history_limit_clamped_low() {
+    let db = Db::open_in_memory().unwrap();
+    for i in 0..60 {
+        add(
+            &db,
+            &format!("h{i}"),
+            "GET",
+            &format!("https://x.test/{i}"),
+            i,
+            0,
+        )
+        .await;
+    }
+    assert_eq!(db.load_workspace().await.unwrap().history.len(), 50);
+}
+
+#[test]
+fn history_limit_clamped_high() {
+    assert_eq!(clamp_history_limit(1_000_000), 10_000);
+    assert_eq!(clamp_history_limit(0), 50);
+    assert_eq!(clamp_history_limit(500), 500);
+}
+
+#[tokio::test]
+async fn settings_history_limit_clamped_on_read() {
+    let db = Db::open_in_memory().unwrap();
+    db.save_entities(vec![EntityOp::SetSettings {
+        json: json!({"historyLimit": 0}).to_string(),
+    }])
+    .await
+    .unwrap();
+    assert_eq!(
+        db.load_workspace().await.unwrap().settings.history_limit,
+        50
+    );
+    db.save_entities(vec![EntityOp::SetSettings {
+        json: json!({"historyLimit": 99999999}).to_string(),
+    }])
+    .await
+    .unwrap();
+    assert_eq!(
+        db.load_workspace().await.unwrap().settings.history_limit,
+        10_000
     );
 }

@@ -13,6 +13,15 @@ use crate::settings::Settings;
 const SETTINGS_KEY: &str = "settings";
 const BACKUP_VERSION: u64 = 1;
 
+/// Spec range for the history cap (§6.5).
+pub const MIN_HISTORY_LIMIT: u32 = 50;
+pub const MAX_HISTORY_LIMIT: u32 = 10_000;
+
+/// Clamps any history limit (settings, caller argument) into the spec range.
+pub fn clamp_history_limit(limit: u32) -> u32 {
+    limit.clamp(MIN_HISTORY_LIMIT, MAX_HISTORY_LIMIT)
+}
+
 fn other(msg: impl Into<String>) -> CoreError {
     CoreError::new(ErrorKind::Other, msg)
 }
@@ -57,9 +66,11 @@ fn read_settings(conn: &Connection) -> Result<Settings, CoreError> {
             |r| r.get(0),
         )
         .optional()?;
-    Ok(raw
+    let mut settings: Settings = raw
         .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default())
+        .unwrap_or_default();
+    settings.history_limit = clamp_history_limit(settings.history_limit);
+    Ok(settings)
 }
 
 fn history_rows(conn: &Connection, limit: u32) -> Result<Vec<Value>, CoreError> {
@@ -191,7 +202,15 @@ fn apply_op(tx: &Transaction, op: EntityOp) -> Result<(), CoreError> {
             )?;
         }
         EntityOp::SetSettings { json } => {
-            parse(&json)?;
+            let v = parse(&json)?;
+            // Normalise the history limit when the payload is a valid Settings document.
+            let json = match serde_json::from_value::<Settings>(v) {
+                Ok(mut s) => {
+                    s.history_limit = clamp_history_limit(s.history_limit);
+                    serde_json::to_string(&s)?
+                }
+                Err(_) => json,
+            };
             tx.execute(
                 "INSERT INTO settings (key, value_json) VALUES (?1, ?2)
                  ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json",
@@ -266,7 +285,7 @@ pub fn add_history(
 ) -> Result<(), CoreError> {
     let tx = conn.transaction()?;
     insert_history(&tx, item_json, method, url, status, duration_ms, ts)?;
-    prune_history(&tx, limit)?;
+    prune_history(&tx, clamp_history_limit(limit))?;
     tx.commit()?;
     Ok(())
 }
@@ -291,6 +310,7 @@ pub fn search_history(conn: &Connection, q: &str, limit: u32) -> Result<Vec<Stri
         let rows = stmt.query_map(args, |r| r.get::<_, String>(0))?;
         rows.collect::<Result<Vec<_>, _>>()
     };
+    let limit = clamp_history_limit(limit);
     let out = match fts_query(q) {
         Some(m) => collect(
             conn.prepare(
