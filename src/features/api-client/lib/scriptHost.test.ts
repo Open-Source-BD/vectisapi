@@ -67,10 +67,51 @@ describe('runScript', () => {
   });
 
   it('empty script does not spawn worker', async () => {
+    vi.resetModules();
+    const { runScript } = await import('./scriptHost');
     const spy = vi.spyOn(globalThis, 'Worker');
     const r = await runScript({ phase: 'pre', code: '  \n', vars: { a: 'b' } });
     expect(spy).not.toHaveBeenCalled();
     expect(r).toEqual({ vars: { a: 'b' }, setVars: [], testResults: [] });
     spy.mockRestore();
+  });
+
+  it('worker construction failure yields error result and next run still works', async () => {
+    vi.resetModules();
+    const { runScript } = await import('./scriptHost');
+    const RealWorker = globalThis.Worker;
+    let first = true;
+    vi.stubGlobal('Worker', function (...a: ConstructorParameters<typeof Worker>) {
+      if (first) {
+        first = false;
+        throw new Error('no workers here');
+      }
+      return new RealWorker(...a);
+    });
+    try {
+      const r = await runScript({ phase: 'pre', code: '1', vars: {} });
+      expect(r.error).toBe('no workers here');
+      const ok = await runScript({ phase: 'pre', code: 'pm.environment.set("k","v")', vars: {} });
+      expect(ok.setVars).toEqual([['k', 'v']]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('pre-request set of an iteration-data key is visible to tests', async () => {
+    const pre = await runScript({
+      phase: 'pre',
+      code: 'pm.environment.set("row", "changed")',
+      vars: { row: 'orig' },
+      iterationData: { row: 'orig' },
+    });
+    const post = await runScript({
+      phase: 'test',
+      code: 'pm.test("t", () => pm.expect(pm.environment.get("row")).to.eql("changed"))',
+      vars: pre.vars,
+      iterationData: { row: 'orig' },
+      response: { code: 200, status: 'OK', body: '' },
+    });
+    expect(post.testResults).toEqual([{ name: 't', pass: true }]);
   });
 });

@@ -32,19 +32,25 @@ function getWorker(): Worker {
 function execute(run: ScriptRun, timeoutMs: number): Promise<ScriptResult> {
   return new Promise((resolve) => {
     const id = nextId++;
-    const w = getWorker();
-    const finish = (result: ScriptResult) => {
-      clearTimeout(timer);
-      w.removeEventListener('message', onMessage);
-      w.removeEventListener('error', onError);
-      resolve(result);
-    };
     const failed = (message: string): ScriptResult => ({
       vars: run.vars,
       setVars: [],
       testResults: [],
       error: message,
     });
+    let w: Worker;
+    try {
+      w = getWorker();
+    } catch (e) {
+      resolve(failed((e as Error).message || 'Script worker failed to start'));
+      return;
+    }
+    const finish = (result: ScriptResult) => {
+      clearTimeout(timer);
+      w.removeEventListener('message', onMessage);
+      w.removeEventListener('error', onError);
+      resolve(result);
+    };
     const onMessage = (ev: MessageEvent<{ id: number; result: ScriptResult }>) => {
       if (ev.data.id === id) finish(ev.data.result);
     };
@@ -61,7 +67,13 @@ function execute(run: ScriptRun, timeoutMs: number): Promise<ScriptResult> {
     }, timeoutMs);
     w.addEventListener('message', onMessage);
     w.addEventListener('error', onError);
-    w.postMessage({ id, run });
+    try {
+      w.postMessage({ id, run });
+    } catch (e) {
+      w.terminate();
+      if (worker === w) worker = null;
+      finish(failed((e as Error).message || 'Script worker failed'));
+    }
   });
 }
 
@@ -74,6 +86,6 @@ export function runScript(run: ScriptRun, timeoutMs: number = DEFAULT_TIMEOUT_MS
     return Promise.resolve({ vars: run.vars, setVars: [], testResults: [] });
   }
   const result = queue.then(() => execute(run, timeoutMs));
-  queue = result;
+  queue = result.catch(() => {});
   return result;
 }

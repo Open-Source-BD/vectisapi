@@ -32,7 +32,14 @@ export interface Pm {
  * (absent) DOM whether they run in the worker or, under tests, on the main thread.
  */
 function compile(src: string): (pm: Pm) => void {
-  const fn = new Function('pm', 'window', 'document', src);
+  let fn: (...args: unknown[]) => void;
+  try {
+    fn = new Function('pm', 'window', 'document', src);
+  } catch (e) {
+    // Eval refused by the CSP surfaces as EvalError; make that diagnosable.
+    if (e instanceof EvalError) throw new Error('Scripts are blocked by the content security policy');
+    throw e;
+  }
   return (pm) => fn(pm, undefined, undefined);
 }
 
@@ -50,15 +57,19 @@ export class PmSandbox {
     environments: EnvVar[],
     onEnvSet: (key: string, value: string) => void,
     iterationData: Record<string, string> = {},
+    /** False when `environments` already carries the iteration overlay (+ script writes). */
+    overlayIterationData = true,
   ) {
     const envMap = this.envMap;
     environments.forEach((e) => {
       if (e.key) envMap[e.key] = e.value;
     });
     // Iteration data overrides env/globals for the current run row.
-    Object.entries(iterationData).forEach(([k, v]) => {
-      envMap[k] = v;
-    });
+    if (overlayIterationData) {
+      Object.entries(iterationData).forEach(([k, v]) => {
+        envMap[k] = v;
+      });
+    }
 
     this.pm = {
       environment: {
