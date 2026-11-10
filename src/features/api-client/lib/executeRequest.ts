@@ -66,30 +66,60 @@ export async function executeRequest(
     error: { phase: 'send', message },
   });
 
-  if (opts.signal?.aborted) return fail('cancelled', 'Request cancelled');
-  const onAbort = () => void cancelRequest(spec.requestId).catch(() => {});
-  opts.signal?.addEventListener('abort', onAbort, { once: true });
+  const signal = opts.signal;
+  if (signal?.aborted) return fail('cancelled', 'Request cancelled');
+
+  // Abort settles immediately — even if Rust hasn't registered the id yet and the
+  // cancel misses (then it's retried once shortly after, best-effort).
+  let onAbort = () => {};
+  const aborted = new Promise<ExecuteResult>((resolve) => {
+    onAbort = () => {
+      resolve(fail('cancelled', 'Request cancelled'));
+      void cancelNative(spec.requestId);
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+
+  const send = async (): Promise<ExecuteResult> => {
+    try {
+      const { meta, prefix } = await sendRequest(spec);
+      const data = toResponseData(meta, prefix);
+
+      // Tests see the whole body even when the pane only holds the 2 MB prefix.
+      let testBody = data.rawText;
+      if (meta.truncated && tab.tests.trim()) {
+        try {
+          testBody = decodeText(await getResponseBody(meta.responseId, 0));
+        } catch {
+          // Body evicted from the store: tests run against the prefix.
+        }
+      }
+      if (signal?.aborted) return fail('cancelled', 'Request cancelled');
+      sandbox.attachResponse(data.status, data.statusText, testBody);
+      sandbox.runTests(tab.tests);
+      return { response: { ...data, testResults: sandbox.testResults }, finalUrl: spec.url };
+    } catch (e) {
+      const { kind, message } = toNativeError(e);
+      return fail(kind, message);
+    }
+  };
 
   try {
-    const { meta, prefix } = await sendRequest(spec);
-    const data = toResponseData(meta, prefix);
-
-    // Tests see the whole body even when the pane only holds the 2 MB prefix.
-    let testBody = data.rawText;
-    if (meta.truncated && tab.tests.trim()) {
-      try {
-        testBody = decodeText(await getResponseBody(meta.responseId, 0));
-      } catch {
-        // Body evicted from the store: tests run against the prefix.
-      }
-    }
-    sandbox.attachResponse(data.status, data.statusText, testBody);
-    sandbox.runTests(tab.tests);
-    return { response: { ...data, testResults: sandbox.testResults }, finalUrl: spec.url };
-  } catch (e) {
-    const { kind, message } = toNativeError(e);
-    return fail(kind, message);
+    return await Promise.race([send(), aborted]);
   } finally {
-    opts.signal?.removeEventListener('abort', onAbort);
+    signal?.removeEventListener('abort', onAbort);
+  }
+}
+
+/** Retry delay when a cancel races ahead of the engine registering the request. */
+const CANCEL_RETRY_MS = 50;
+
+async function cancelNative(requestId: string): Promise<void> {
+  try {
+    if (await cancelRequest(requestId)) return;
+    await new Promise((r) => setTimeout(r, CANCEL_RETRY_MS));
+    await cancelRequest(requestId);
+  } catch (e) {
+    console.warn('cancel_request failed', e);
   }
 }

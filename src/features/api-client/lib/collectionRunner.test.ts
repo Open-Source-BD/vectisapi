@@ -6,7 +6,7 @@ vi.mock('./native/invoke', () => ({
   getResponseBody: vi.fn(),
 }));
 
-import { sendRequest } from './native/invoke';
+import { cancelRequest, sendRequest } from './native/invoke';
 import { runCollection, type RunResultItem } from './collectionRunner';
 import { createDefaultTab } from '../store/useApiStore';
 import type { HttpRequestSpec, RequestNode } from '../types';
@@ -52,7 +52,9 @@ async function run(requests: RequestNode[], extra: Partial<Parameters<typeof run
   return { results, lastProgress };
 }
 
-beforeEach(() => mockSend.mockReset());
+beforeEach(() => {
+  mockSend.mockReset();
+});
 
 describe('runCollection', () => {
   it('runs requests in order and reports progress', async () => {
@@ -120,5 +122,28 @@ describe('runCollection', () => {
     mockSend.mockResolvedValue(proxyRes('{}'));
     await run([reqNode('a')], { timeoutMs: 777 });
     expect((mockSend.mock.calls[0][0] as HttpRequestSpec).timeoutMs).toBe(777);
+  });
+
+  it('runner drops result that resolves after cancel', async () => {
+    let resolveSend: (v: ReturnType<typeof proxyRes>) => void = () => {};
+    mockSend.mockImplementation(() => new Promise((r) => (resolveSend = r)));
+    vi.mocked(cancelRequest).mockResolvedValue(false);
+    const ctrl = new AbortController();
+    const results: RunResultItem[] = [];
+    const running = runCollection({
+      requests: [reqNode('a'), reqNode('b')],
+      seedVars: [],
+      iterations: 1,
+      signal: ctrl.signal,
+      onResult: (i) => results.push(i),
+      onProgress: () => {},
+    });
+    await vi.waitFor(() => expect(mockSend).toHaveBeenCalledTimes(1));
+    ctrl.abort();
+    await running;
+    resolveSend(proxyRes('{}'));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(results).toHaveLength(0);
+    expect(mockSend).toHaveBeenCalledTimes(1);
   });
 });

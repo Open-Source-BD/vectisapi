@@ -160,6 +160,25 @@ describe('executeRequest', () => {
     expect(r.error?.phase).toBe('send');
   });
 
+  it('abort before rust registers still settles as cancelled', async () => {
+    // The engine never answers and doesn't know the id yet: cancel misses.
+    mockSend.mockImplementation(() => new Promise(() => {}));
+    mockCancel.mockResolvedValue(false);
+    const ctrl = new AbortController();
+    const tab = createDefaultTab();
+    tab.url = 'http://example.test';
+    tab.tests = 'pm.test("never", () => {})';
+    const pending = executeRequest(tab, [], { signal: ctrl.signal, timeoutMs: 0 });
+    await vi.waitFor(() => expect(mockSend).toHaveBeenCalled());
+    ctrl.abort();
+    const r = await pending;
+    expect(r.response).toMatchObject({ status: 0, errorKind: 'cancelled', testResults: [] });
+    expect(r.error?.phase).toBe('send');
+    // Best-effort cancel is retried once shortly after.
+    await vi.waitFor(() => expect(mockCancel).toHaveBeenCalledTimes(2));
+    expect(mockCancel).toHaveBeenNthCalledWith(2, sentSpec().requestId);
+  });
+
   it('an already-aborted signal does not send', async () => {
     const ctrl = new AbortController();
     ctrl.abort();

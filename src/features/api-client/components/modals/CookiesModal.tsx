@@ -17,7 +17,10 @@ export function CookiesModal() {
   const reload = useCallback(() => {
     cookiesList()
       .then(setCookies)
-      .catch(() => setCookies([]));
+      .catch((e) => {
+        console.warn('cookies_list failed', e);
+        setCookies([]);
+      });
   }, []);
 
   // Read the jar each time the modal opens (it changes on every send).
@@ -28,7 +31,9 @@ export function CookiesModal() {
   if (!isOpen) return null;
 
   const clearCookies = (domain?: string) => {
-    void (domain ? cookiesClearDomain(domain) : cookiesClear()).catch(() => {}).finally(reload);
+    void (domain ? cookiesClearDomain(domain) : cookiesClear())
+      .catch((e) => console.warn('clearing cookies failed', e))
+      .finally(reload);
   };
 
   const jar: Record<string, CookieView[]> = {};

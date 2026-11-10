@@ -25,10 +25,8 @@ export async function executeActiveSend(): Promise<void> {
     state.updateActiveTab({ url: 'http://' + resolved });
   }
 
-  const result = await executeRequest(tab, vars, {
-    onSetVar: state.setEnvVar,
-    timeoutMs: state.settings?.timeoutMs,
-  });
+  // No timeoutMs: the engine applies the live settings timeout.
+  const result = await executeRequest(tab, vars, { onSetVar: state.setEnvVar });
 
   if (result.error?.phase === 'pre-request') {
     alert('Pre-request Script Error:\n' + result.error.message);

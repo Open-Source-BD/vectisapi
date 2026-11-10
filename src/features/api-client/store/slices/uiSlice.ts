@@ -85,8 +85,9 @@ export const createUiSlice: StateCreator<StoreState, [], [], UiSlice> = (set) =>
   loadSettings: async () => {
     try {
       set({ settings: await getSettings() });
-    } catch {
-      // Not running under Tauri (or IPC failed): the engine still applies its own defaults.
+    } catch (e) {
+      // The engine still applies its own settings; only the UI copy is missing.
+      console.warn('get_settings failed', e);
     }
   },
 });

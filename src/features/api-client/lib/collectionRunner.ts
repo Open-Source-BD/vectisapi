@@ -63,6 +63,8 @@ export async function runCollection(cfg: RunConfig): Promise<void> {
         onSetVar: (k, v) => bag.set(k, v),
         timeoutMs: cfg.timeoutMs,
       });
+      // A cancelled run must not report a result that settled after the abort.
+      if (cfg.signal.aborted) return;
       done++;
       cfg.onResult({
         requestId: node.id,

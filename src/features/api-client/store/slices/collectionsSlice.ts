@@ -295,7 +295,6 @@ export const createCollectionsSlice: StateCreator<StoreState, [], [], Collection
       signal: runAbort.signal,
       onResult: (item) => set((s) => ({ runnerResults: [...s.runnerResults, item] })),
       onProgress: (current, total) => set({ runnerProgress: { current, total } }),
-      timeoutMs: state.settings?.timeoutMs,
     });
 
     runAbort = null;

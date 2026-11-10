@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { createDefaultTab } from '../store/useApiStore';
 import type { TabState } from '../types';
 
@@ -57,6 +57,10 @@ function proxyRes(body: string, status = 200) {
   };
 }
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
   (selectActiveVars as ReturnType<typeof vi.fn>).mockReturnValue([]);
@@ -99,7 +103,7 @@ describe('executeActiveSend', () => {
     expect(state.addHistory).toHaveBeenCalledOnce();
   });
 
-  it('passes the settings timeout to executeRequest', async () => {
+  it('leaves the timeout to the engine (live settings)', async () => {
     const mockExec = executeRequest as ReturnType<typeof vi.fn>;
     mockExec.mockResolvedValue({ response: proxyRes('{}'), finalUrl: 'https://example.test/' });
 
@@ -107,7 +111,7 @@ describe('executeActiveSend', () => {
     mockGetState.mockReturnValue(state);
 
     await executeActiveSend();
-    expect(mockExec.mock.calls[0][2]).toMatchObject({ timeoutMs: 4321 });
+    expect(mockExec.mock.calls[0][2].timeoutMs).toBeUndefined();
     expect(state.addHistory).toHaveBeenCalledWith(expect.objectContaining({ url: 'https://example.test/' }));
   });
 
@@ -124,7 +128,6 @@ describe('executeActiveSend', () => {
     expect(state.setIsLoading).toHaveBeenCalledWith(false);
     expect(state.updateActiveTab).not.toHaveBeenCalled();
     expect(alertSpy).toHaveBeenCalledOnce();
-    vi.unstubAllGlobals();
   });
 
   it('writes error response when request fails', async () => {
