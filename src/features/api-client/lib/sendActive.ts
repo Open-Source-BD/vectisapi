@@ -4,9 +4,27 @@ import { resolveEnv } from './envResolver';
 import { generateId } from './id';
 import type { TabState } from '../types';
 
+/** Tab id → the abort controller of that tab's send in flight. */
+const inflight = new Map<string, AbortController>();
+
+/** Cancels the HTTP send in flight on `tabId`; false if that tab isn't sending. */
+export function cancelSend(tabId: string): boolean {
+  const controller = inflight.get(tabId);
+  if (!controller) return false;
+  controller.abort();
+  return true;
+}
+
+/** Cancels the active tab's HTTP send, if any. */
+export function cancelActiveSend(): boolean {
+  return cancelSend(useApiStore.getState().activeTabId);
+}
+
 /**
  * Send the active tab's request through the native engine and write the result
- * back to the store. The Rust cookie jar attaches and captures cookies itself.
+ * back to that tab (even if the user switched tabs meanwhile). The Rust cookie
+ * jar attaches and captures cookies itself. Each tab sends independently and can
+ * be cancelled with `cancelSend`; a tab already sending ignores another send.
  * Single-send only — the collection runner uses `executeRequest` directly.
  */
 export async function executeActiveSend(): Promise<void> {
@@ -15,21 +33,33 @@ export async function executeActiveSend(): Promise<void> {
   if (!tab.url) return;
   // Realtime tabs (ws/sse) don't use the HTTP send pipeline.
   if (tab.protocol && tab.protocol !== 'http') return;
+  if (inflight.has(tab.id)) return;
 
-  state.setIsLoading(true);
+  const controller = new AbortController();
+  inflight.set(tab.id, controller);
+  state.setTabLoading(tab.id, true);
+  try {
+    await send(tab, controller.signal);
+  } finally {
+    inflight.delete(tab.id);
+    useApiStore.getState().setTabLoading(tab.id, false);
+  }
+}
 
+async function send(tab: TabState, signal: AbortSignal): Promise<void> {
+  const state = useApiStore.getState();
   const vars = selectActiveVars(state);
   const resolved = resolveEnv(tab.url, vars).trim();
   // An unresolved `{{base}}` is left alone; the engine reports it as an invalid URL.
   if (!/^https?:\/\//i.test(resolved) && !resolved.startsWith('{{')) {
-    state.updateActiveTab({ url: 'http://' + resolved });
+    state.updateTab(tab.id, { url: 'http://' + resolved });
   }
 
   // No timeoutMs: the engine applies the live settings timeout.
-  const result = await executeRequest(tab, vars, { onSetVar: state.setEnvVar });
+  const result = await executeRequest(tab, vars, { onSetVar: state.setEnvVar, signal });
 
   if (result.error?.phase === 'pre-request') {
-    state.updateActiveTab({
+    state.updateTab(tab.id, {
       response: {
         ok: false,
         status: 0,
@@ -42,12 +72,11 @@ export async function executeActiveSend(): Promise<void> {
       },
       activeResTab: 'body',
     });
-    state.setIsLoading(false);
     return;
   }
 
   if (result.error || !result.response) {
-    state.updateActiveTab({
+    state.updateTab(tab.id, {
       response: result.response ?? {
         ok: false,
         status: 0,
@@ -60,12 +89,11 @@ export async function executeActiveSend(): Promise<void> {
       },
       activeResTab: 'body',
     });
-    state.setIsLoading(false);
     return;
   }
 
   // Success — keep the prior response for the Diff view.
-  state.updateActiveTab({
+  state.updateTab(tab.id, {
     response: result.response,
     prevResponse: tab.response,
     activeResTab: 'body',
@@ -84,5 +112,4 @@ export async function executeActiveSend(): Promise<void> {
     date: new Date().toISOString(),
     request: snapshot,
   });
-  state.setIsLoading(false);
 }

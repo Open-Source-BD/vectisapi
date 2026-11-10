@@ -36,8 +36,8 @@ const mockState = (overrides: Record<string, unknown> = {}) => {
   return {
     tabs: [tab],
     activeTabId: 't1',
-    setIsLoading: vi.fn(),
-    updateActiveTab: vi.fn(),
+    setTabLoading: vi.fn(),
+    updateTab: vi.fn(),
     setEnvVar: vi.fn(),
     addHistory: vi.fn(),
     settings: { timeoutMs: 4321 },
@@ -73,7 +73,7 @@ describe('executeActiveSend', () => {
     mockGetState.mockReturnValue(state);
     await executeActiveSend();
     expect(executeRequest).not.toHaveBeenCalled();
-    expect(state.setIsLoading).not.toHaveBeenCalled();
+    expect(state.setTabLoading).not.toHaveBeenCalled();
   });
 
   it('skips non-http protocol tabs', async () => {
@@ -82,7 +82,7 @@ describe('executeActiveSend', () => {
     mockGetState.mockReturnValue(state);
     await executeActiveSend();
     expect(executeRequest).not.toHaveBeenCalled();
-    expect(state.setIsLoading).not.toHaveBeenCalled();
+    expect(state.setTabLoading).not.toHaveBeenCalled();
   });
 
   it('sets loading state and sends request', async () => {
@@ -94,10 +94,11 @@ describe('executeActiveSend', () => {
 
     await executeActiveSend();
 
-    expect(state.setIsLoading).toHaveBeenCalledWith(true);
-    expect(state.setIsLoading).toHaveBeenCalledWith(false);
+    expect(state.setTabLoading).toHaveBeenCalledWith('t1', true);
+    expect(state.setTabLoading).toHaveBeenCalledWith('t1', false);
     expect(executeRequest).toHaveBeenCalledOnce();
-    expect(state.updateActiveTab).toHaveBeenCalledWith(
+    expect(state.updateTab).toHaveBeenCalledWith(
+      't1',
       expect.objectContaining({ response: expect.objectContaining({ status: 200 }) }),
     );
     expect(state.addHistory).toHaveBeenCalledOnce();
@@ -147,8 +148,9 @@ describe('executeActiveSend', () => {
     mockGetState.mockReturnValue(state);
 
     await executeActiveSend();
-    expect(state.setIsLoading).toHaveBeenCalledWith(false);
-    expect(state.updateActiveTab).toHaveBeenCalledWith(
+    expect(state.setTabLoading).toHaveBeenCalledWith('t1', false);
+    expect(state.updateTab).toHaveBeenCalledWith(
+      't1',
       expect.objectContaining({
         response: expect.objectContaining({ status: 0, statusText: 'Script Error', rawText: 'SyntaxError' }),
       }),
@@ -163,7 +165,8 @@ describe('executeActiveSend', () => {
     mockGetState.mockReturnValue(state);
 
     await executeActiveSend();
-    expect(state.updateActiveTab).toHaveBeenCalledWith(
+    expect(state.updateTab).toHaveBeenCalledWith(
+      't1',
       expect.objectContaining({
         response: expect.objectContaining({ status: 0, rawText: 'Network Error' }),
       }),
@@ -189,7 +192,7 @@ describe('executeActiveSend', () => {
     mockGetState.mockReturnValue(state);
 
     await executeActiveSend();
-    expect(state.updateActiveTab).toHaveBeenCalledWith(expect.objectContaining({ response: errRes }));
+    expect(state.updateTab).toHaveBeenCalledWith('t1', expect.objectContaining({ response: errRes }));
     expect(state.addHistory).not.toHaveBeenCalled();
   });
 
@@ -202,7 +205,7 @@ describe('executeActiveSend', () => {
     mockGetState.mockReturnValue(state);
 
     await executeActiveSend();
-    expect(state.updateActiveTab).toHaveBeenCalledWith(expect.objectContaining({ url: 'http://example.test' }));
+    expect(state.updateTab).toHaveBeenCalledWith('t1', expect.objectContaining({ url: 'http://example.test' }));
   });
 
   it('leaves an unresolved {{base}} url alone', async () => {
@@ -214,6 +217,6 @@ describe('executeActiveSend', () => {
     mockGetState.mockReturnValue(state);
 
     await executeActiveSend();
-    expect(state.updateActiveTab).not.toHaveBeenCalledWith(expect.objectContaining({ url: expect.anything() }));
+    expect(state.updateTab).not.toHaveBeenCalledWith('t1', expect.objectContaining({ url: expect.anything() }));
   });
 });

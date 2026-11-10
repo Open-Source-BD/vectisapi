@@ -62,6 +62,8 @@ export interface TabsSlice {
   cancelCloseTab: () => void;
   setActiveTab: (id: string) => void;
   updateActiveTab: (updates: Partial<TabState>) => void;
+  /** Like `updateActiveTab` for a given tab (no-op if it was closed). */
+  updateTab: (id: string, updates: Partial<TabState>) => void;
   /** Swap a truncated response's preview for its full body (no-op if that tab moved on to another response). */
   setFullResponseBody: (tabId: string, responseId: string, rawText: string) => void;
 
@@ -148,6 +150,11 @@ export const createTabsSlice: StateCreator<StoreState, [], [], TabsSlice> = (set
   updateActiveTab: (updates) =>
     set((s) => ({
       tabs: s.tabs.map((t) => (t.id === s.activeTabId ? { ...t, ...updates } : t)),
+    })),
+
+  updateTab: (id, updates) =>
+    set((s) => ({
+      tabs: s.tabs.map((t) => (t.id === id ? { ...t, ...updates } : t)),
     })),
 
   setFullResponseBody: (tabId, responseId, rawText) =>

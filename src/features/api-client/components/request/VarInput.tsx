@@ -8,6 +8,8 @@ interface VarInputProps {
   placeholder?: string;
   spellCheck?: boolean;
   'aria-label'?: string;
+  /** Escape pressed while no suggestion list is open. */
+  onEscape?: () => void;
 }
 
 /** Render text with `{{var}}` tokens wrapped in colored spans (HTML-escaped). */
@@ -33,7 +35,15 @@ function openToken(text: string, caret: number): { start: number; partial: strin
  * trip Zustand's "getSnapshot should be cached" loop. Caret/suggestion state is
  * computed in event handlers (never reading the ref during render).
  */
-export function VarInput({ value, onValueChange, className, placeholder, spellCheck, ...rest }: VarInputProps) {
+export function VarInput({
+  value,
+  onValueChange,
+  className,
+  placeholder,
+  spellCheck,
+  onEscape,
+  ...rest
+}: VarInputProps) {
   const globals = useApiStore((s) => s.globals);
   const environments = useApiStore((s) => s.environments);
   const activeEnvId = useApiStore((s) => s.activeEnvId);
@@ -87,7 +97,10 @@ export function VarInput({ value, onValueChange, className, placeholder, spellCh
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (!open) return;
+    if (!open) {
+      if (e.key === 'Escape' && onEscape) onEscape();
+      return;
+    }
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       setSel((i) => Math.min(i + 1, matches.length - 1));

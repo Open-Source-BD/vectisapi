@@ -1,5 +1,6 @@
 import type { HttpMethod, Protocol } from '../../types';
 import { selectActiveTab, useApiStore } from '../../store/useApiStore';
+import { cancelSend } from '../../lib/sendActive';
 import { VarInput } from './VarInput';
 
 const METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'];
@@ -15,7 +16,7 @@ interface UrlBarProps {
 
 export function UrlBar({ send }: UrlBarProps) {
   const tab = useApiStore(selectActiveTab);
-  const isLoading = useApiStore((s) => s.isLoading);
+  const isLoading = useApiStore((s) => !!s.loadingTabs[s.activeTabId]);
   const updateActiveTab = useApiStore((s) => s.updateActiveTab);
   const saveActiveRequest = useApiStore((s) => s.saveActiveRequest);
   const saveActiveRequestAs = useApiStore((s) => s.saveActiveRequestAs);
@@ -74,6 +75,7 @@ export function UrlBar({ send }: UrlBarProps) {
         }
         spellCheck={false}
         aria-label={isRealtime ? `${protocol.toUpperCase()} URL` : 'Request URL'}
+        onEscape={isLoading ? () => cancelSend(tab.id) : undefined}
       />
       {isRealtime ? (
         <button
@@ -88,12 +90,11 @@ export function UrlBar({ send }: UrlBarProps) {
         <>
           <button
             className="md-filled-btn send-btn"
-            onClick={send}
-            disabled={isLoading}
-            title="Send Request (Cmd+Enter)"
+            onClick={isLoading ? () => cancelSend(tab.id) : send}
+            title={isLoading ? 'Cancel request (Esc)' : 'Send Request (Cmd+Enter)'}
           >
-            <span className="material-symbols-outlined">{isLoading ? 'hourglass_empty' : 'send'}</span>{' '}
-            {isLoading ? 'Sending' : 'Send'}
+            <span className="material-symbols-outlined">{isLoading ? 'close' : 'send'}</span>{' '}
+            {isLoading ? 'Cancel' : 'Send'}
           </button>
           {isSaved ? (
             <button className="md-tonal-btn save-btn" onClick={saveActiveRequestAs} title="Save As new request">

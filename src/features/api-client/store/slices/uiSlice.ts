@@ -9,7 +9,8 @@ export type Theme = 'light' | 'dark';
 export interface UiSlice {
   theme: Theme;
   activeSidebarTab: SidebarTab;
-  isLoading: boolean;
+  /** Tabs with an HTTP send in flight (tab id → true); each tab sends and cancels on its own. */
+  loadingTabs: Record<string, boolean>;
   isEnvModalOpen: boolean;
   isSaveModalOpen: boolean;
   isCodeModalOpen: boolean;
@@ -33,7 +34,7 @@ export interface UiSlice {
   setCollectionSearch: (v: string) => void;
   setHistorySearch: (v: string) => void;
   setActiveSidebarTab: (tab: SidebarTab) => void;
-  setIsLoading: (v: boolean) => void;
+  setTabLoading: (tabId: string, loading: boolean) => void;
   setEnvModalOpen: (v: boolean) => void;
   setCurlModalOpen: (v: boolean) => void;
   setResponseModalOpen: (v: boolean) => void;
@@ -56,7 +57,7 @@ export interface UiSlice {
 export const createUiSlice: StateCreator<StoreState, [], [], UiSlice> = (set) => ({
   theme: 'light',
   activeSidebarTab: 'history',
-  isLoading: false,
+  loadingTabs: {},
   isEnvModalOpen: false,
   isSaveModalOpen: false,
   isCodeModalOpen: false,
@@ -77,7 +78,13 @@ export const createUiSlice: StateCreator<StoreState, [], [], UiSlice> = (set) =>
   setCollectionSearch: (collectionSearch) => set({ collectionSearch }),
   setHistorySearch: (historySearch) => set({ historySearch }),
   setActiveSidebarTab: (activeSidebarTab) => set({ activeSidebarTab }),
-  setIsLoading: (isLoading) => set({ isLoading }),
+  setTabLoading: (tabId, loading) =>
+    set((s) => {
+      const loadingTabs = { ...s.loadingTabs };
+      if (loading) loadingTabs[tabId] = true;
+      else delete loadingTabs[tabId];
+      return { loadingTabs };
+    }),
   setEnvModalOpen: (isEnvModalOpen) => set({ isEnvModalOpen }),
   setCurlModalOpen: (isCurlModalOpen) => set({ isCurlModalOpen }),
   setResponseModalOpen: (isResponseModalOpen) => set({ isResponseModalOpen }),
