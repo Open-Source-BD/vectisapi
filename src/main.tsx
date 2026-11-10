@@ -5,8 +5,10 @@ import '@fontsource/roboto/500.css';
 import '@fontsource/roboto/700.css';
 import '@fontsource/fira-code/400.css';
 import '@fontsource/fira-code/500.css';
-import 'material-symbols/outlined.css';
 import './app/globals.css';
+// After globals.css, as in next-postman (whose Google Fonts <link> follows the app CSS): the
+// icon class's 24px size must win over base.css's 20px.
+import './assets/fonts/material-symbols.css';
 import { ApiClient } from '@/features/api-client/ApiClient';
 
 // Browser-only e2e/fidelity builds (`--mode e2e`) stand in for the Rust layer; Vite drops this otherwise.
