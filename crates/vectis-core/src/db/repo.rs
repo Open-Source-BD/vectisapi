@@ -267,7 +267,7 @@ fn prune_history(tx: &Transaction, limit: u32) -> Result<(), CoreError> {
     tx.execute(
         "DELETE FROM history WHERE seq NOT IN
          (SELECT seq FROM history ORDER BY ts DESC, seq DESC LIMIT ?1)",
-        [limit],
+        [clamp_history_limit(limit)],
     )?;
     Ok(())
 }

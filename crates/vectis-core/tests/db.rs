@@ -405,3 +405,24 @@ async fn settings_history_limit_clamped_on_read() {
         10_000
     );
 }
+
+#[tokio::test]
+async fn import_backup_with_zero_history_limit_keeps_50() {
+    let history: Vec<Value> = (0..60)
+        .rev()
+        .map(|i| {
+            serde_json::from_str(&item(
+                &format!("h{i}"),
+                "GET",
+                &format!("https://x.test/{i}"),
+            ))
+            .unwrap()
+        })
+        .collect();
+    let backup = json!({"version": 1, "history": history, "settings": {"historyLimit": 0}});
+    let db = Db::open_in_memory().unwrap();
+    db.import_backup(backup.to_string()).await.unwrap();
+    let h = db.load_workspace().await.unwrap().history;
+    assert_eq!(h.len(), 50);
+    assert_eq!(h[0]["id"], "h59");
+}
