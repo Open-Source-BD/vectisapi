@@ -8,6 +8,13 @@ vi.mock('../../lib/native/invoke', async (orig) => ({
   saveResponseBody: vi.fn(),
 }));
 
+// A small "large body" threshold keeps the collapsed-tree test fast. Only ResponsePane sees it:
+// CodeView keeps its own module-scoped value.
+vi.mock('@/components/ui/CodeView', async (orig) => ({
+  ...(await orig<typeof import('@/components/ui/CodeView')>()),
+  VIRTUALIZE_MIN_CHARS: 2_000,
+}));
+
 import { getResponseBody, saveResponseBody } from '../../lib/native/invoke';
 import { useApiStore, selectActiveTab } from '../../store/useApiStore';
 import { createDefaultTab } from '../../store/slices/helpers';
@@ -129,13 +136,14 @@ describe('ResponsePane large bodies', () => {
   });
 
   it('a loaded large JSON body opens the tree collapsed below the root', async () => {
-    const big = JSON.stringify(Array.from({ length: 30_000 }, (_, i) => ({ id: i, name: `n${i}` })));
+    const big = JSON.stringify(Array.from({ length: 200 }, (_, i) => ({ id: i, name: `n${i}` })));
+    expect(JSON.stringify(JSON.parse(big), null, 2).length).toBeGreaterThan(2_000);
     mockGetBody.mockResolvedValue(new TextEncoder().encode(big));
     show(response({ truncated: true, size: big.length, rawText: big.slice(0, 100) }));
     await act(async () => button(/^Load full body/)!.click());
     const branches = host.querySelectorAll('.jt-branch');
     // Root is open (its children are listed), each child object is collapsed.
-    expect(host.querySelectorAll('.jt-collapsed').length).toBe(30_000);
+    expect(host.querySelectorAll('.jt-collapsed').length).toBe(200);
     expect(branches[0].querySelector('.jt-collapsed')).toBeNull();
     expect(branches[0].querySelector('.jt-toggle')?.textContent).toBe('expand_more');
   });
