@@ -70,9 +70,9 @@ export async function executeActiveSend(): Promise<void> {
     prevResponse: tab.response,
     activeResTab: 'body',
   });
+  // Clone without the responses: they can hold a fully loaded 50 MB body, and history stores requests only.
   const snapshot: TabState = {
-    ...JSON.parse(JSON.stringify(tab)),
-    response: null,
+    ...JSON.parse(JSON.stringify({ ...tab, response: null, prevResponse: null })),
     sourceNodeId: undefined,
   };
   state.addHistory({

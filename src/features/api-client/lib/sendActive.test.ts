@@ -103,6 +103,23 @@ describe('executeActiveSend', () => {
     expect(state.addHistory).toHaveBeenCalledOnce();
   });
 
+  it('keeps response bodies out of the history snapshot', async () => {
+    const mockExec = executeRequest as ReturnType<typeof vi.fn>;
+    mockExec.mockResolvedValue({ response: proxyRes('{"new":true}') });
+
+    const state = mockState();
+    Object.assign(state.tabs[0], {
+      response: { ...proxyRes('x'.repeat(1000)), testResults: [] },
+      prevResponse: { ...proxyRes('y'.repeat(1000)), testResults: [] },
+    });
+    mockGetState.mockReturnValue(state);
+
+    await executeActiveSend();
+    const item = (state.addHistory as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(item.request.response).toBeNull();
+    expect(item.request.prevResponse).toBeNull();
+  });
+
   it('leaves the timeout to the engine (live settings)', async () => {
     const mockExec = executeRequest as ReturnType<typeof vi.fn>;
     mockExec.mockResolvedValue({ response: proxyRes('{}'), finalUrl: 'https://example.test/' });
