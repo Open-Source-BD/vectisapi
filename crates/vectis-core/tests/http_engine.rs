@@ -366,19 +366,136 @@ async fn default_user_agent_unless_set() {
     assert_eq!(&body[..], b"from-settings/2");
 }
 
+async fn echo(
+    engine: &HttpEngine,
+    base: &str,
+    data: &[u8],
+) -> Result<(vectis_core::http::ResponseMeta, bytes::Bytes), vectis_core::error::CoreError> {
+    use base64::Engine as _;
+    let mut s = spec("POST", format!("{base}/echo-body"));
+    s.body = BodySpec::Base64(base64::engine::general_purpose::STANDARD.encode(data));
+    engine.send(s).await
+}
+
+fn pseudo_random(len: usize) -> Vec<u8> {
+    let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+    (0..len)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 24) as u8
+        })
+        .collect()
+}
+
 #[tokio::test]
-async fn large_body_prefix_is_capped_and_truncated() {
+async fn prefix_is_2mb_and_truncated_flag() {
     let base = server::spawn().await;
     let (engine, _, store) = setup();
-    let mut s = spec("POST", format!("{base}/echo-body"));
-    let data = vec![7u8; 3 * 1024 * 1024];
-    use base64::Engine as _;
-    s.body = BodySpec::Base64(base64::engine::general_purpose::STANDARD.encode(&data));
-    let (meta, prefix) = engine.send(s).await.unwrap();
-    assert_eq!(meta.size, data.len() as u64);
+    let data = vec![7u8; 5 * 1024 * 1024];
+    let (meta, prefix) = echo(&engine, &base, &data).await.unwrap();
+    assert_eq!(meta.size, 5 * 1024 * 1024);
     assert!(meta.truncated);
-    assert_eq!(prefix.len(), vectis_core::http::INLINE_PREFIX_BYTES);
+    assert_eq!(prefix.len(), 2_097_152);
     assert_eq!(store.len(&meta.response_id), Some(data.len() as u64));
+
+    let (meta, prefix) = echo(&engine, &base, &[1u8; 1024]).await.unwrap();
+    assert!(!meta.truncated);
+    assert_eq!(meta.size, 1024);
+    assert_eq!(prefix.len(), 1024);
+}
+
+#[tokio::test]
+async fn get_range_returns_exact_slice() {
+    let base = server::spawn().await;
+    let (engine, _, store) = setup();
+    let data = pseudo_random(3 * 1024 * 1024);
+    let (meta, _) = echo(&engine, &base, &data).await.unwrap();
+    let id = &meta.response_id;
+    let (start, end) = (1_000_003usize, 2_500_017usize);
+    let got = store.get_range(id, start as u64, Some(end as u64)).unwrap();
+    assert_eq!(&got[..], &data[start..end]);
+    let tail = store.get_range(id, 3 * 1024 * 1024 - 10, None).unwrap();
+    assert_eq!(&tail[..], &data[data.len() - 10..]);
+    assert!(store
+        .get_range(id, 0, Some(u64::MAX))
+        .is_some_and(|b| b.len() == data.len()));
+    assert_eq!(store.get_range(id, 50, Some(10)).unwrap().len(), 0);
+    assert!(store.get_range("missing", 0, None).is_none());
+}
+
+#[tokio::test]
+async fn binary_body_roundtrip_exact_bytes() {
+    let base = server::spawn().await;
+    let (engine, _, store) = setup();
+    let data = pseudo_random(3 * 1024 * 1024);
+    assert!(std::str::from_utf8(&data).is_err());
+    let (meta, _) = echo(&engine, &base, &data).await.unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("out.bin");
+    store.save_to_file(&meta.response_id, &path).unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), data);
+    let err = store.save_to_file("missing", &path).unwrap_err();
+    assert_eq!(err.kind, ErrorKind::Other);
+}
+
+#[test]
+fn lru_evicts_oldest_when_over_cap() {
+    use bytes::Bytes;
+    let mb = 1024 * 1024;
+    let store = ResponseStore::new(10 * mb as u64);
+    let put = |id: &str| {
+        let mut w = store.begin(id);
+        w.push(Bytes::from(vec![0u8; 4 * mb])).unwrap();
+        w.finish();
+    };
+    put("a");
+    put("b");
+    // Reading "a" makes "b" the least recently used.
+    assert!(store.get_range("a", 0, Some(1)).is_some());
+    put("c");
+    assert_eq!(store.len("b"), None);
+    assert_eq!(store.len("a"), Some(4 * mb as u64));
+    put("d");
+    assert_eq!(store.len("a"), None);
+    assert_eq!(store.len("c"), Some(4 * mb as u64));
+    assert_eq!(store.len("d"), Some(4 * mb as u64));
+    assert_eq!(store.used_bytes(), 8 * mb as u64);
+}
+
+#[test]
+fn eviction_never_drops_the_body_being_written() {
+    use bytes::Bytes;
+    let store = ResponseStore::new(10);
+    let mut old = store.begin("old");
+    old.push(Bytes::from_static(&[0; 6])).unwrap();
+    old.finish();
+    let mut cur = store.begin("cur");
+    cur.push(Bytes::from_static(&[1; 4])).unwrap();
+    cur.push(Bytes::from_static(&[1; 4])).unwrap();
+    assert_eq!(store.len("old"), None);
+    assert_eq!(store.used_bytes(), 8);
+    assert_eq!(cur.finish(), 8);
+    assert_eq!(store.len("cur"), Some(8));
+}
+
+#[tokio::test]
+async fn body_over_cap_errors() {
+    let base = server::spawn().await;
+    let mb = 1024 * 1024;
+    let (engine, _, store) = setup_with(Settings {
+        response_store_cap_bytes: mb as u64,
+        ..Settings::default()
+    });
+    let before = store.used_bytes();
+    let err = echo(&engine, &base, &vec![3u8; 2 * mb]).await.unwrap_err();
+    assert_eq!(err.kind, ErrorKind::BodyTooLarge);
+    assert_eq!(store.used_bytes(), before);
+    // A body that fits still works afterwards.
+    let (meta, _) = echo(&engine, &base, &vec![3u8; mb / 2]).await.unwrap();
+    assert_eq!(store.len(&meta.response_id), Some(mb as u64 / 2));
+    assert_eq!(store.used_bytes(), mb as u64 / 2);
 }
 
 #[test]
