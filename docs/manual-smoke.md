@@ -81,8 +81,8 @@ its byte size equals the response Size.
 Expected: native Open dialog; the cell then shows the file name (full path on hover); the response
 `files.file` contains the file's text.
 
-**3d. next-postman import**
-1. Settings → **Import next-postman workspace (zip)** → pick a zipped next-postman workspace folder.
+**3d. Workspace import**
+1. Settings → **Import workspace (zip)** → pick a zipped workspace folder.
 2. Repeat with **(folder)** on the unzipped folder.
 
 Expected: native Open dialog filtered to `.zip` (zip) / a folder picker (folder); collections,
@@ -160,7 +160,7 @@ idle.
 1. Open any modal (Environments, Cookies via Cmd/Ctrl+K → "Manage cookies", Settings).
 
 Expected: the app behind the modal is dimmed **and slightly blurred**, as in
-`docs/fidelity/4-env-modal-light-np.png` (NP, Chromium). Headless Playwright WebKit showed a flat
+`docs/fidelity/4-env-modal-light-ref.png` (REF, Chromium). Headless Playwright WebKit showed a flat
 grey scrim without blur (`*-va-webkit.png`); record whether WKWebView (macOS), WebView2 (Windows)
 and WebKitGTK (Linux) blur. If one doesn't, note the OS/webview version: the CSS uses unprefixed
 `backdrop-filter`, which older WebKit only supports as `-webkit-backdrop-filter`.

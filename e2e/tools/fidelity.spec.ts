@@ -2,15 +2,15 @@ import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 
 /**
- * Side-by-side screenshots of next-postman (NP, `npm run dev`) and VectisAPI (VA, the e2e build
+ * Side-by-side screenshots of the reference app (REF, `npm run dev`) and VectisAPI (VA, the e2e build
  * with mockTauri) in identical states, light + dark, at 1280×800. Both apps get the same seeded
- * workspace and are driven through the same clicks; network is mocked on both sides (NP's
+ * workspace and are driven through the same clicks; network is mocked on both sides (REF's
  * /api/proxy and WebSocket via page.route / routeWebSocket, VA via mockIPC).
  *
- * Output: docs/fidelity/<state>-<theme>-<np|va|va-webkit>.png (committed copies are palette-quantized, see README).
+ * Output: docs/fidelity/<state>-<theme>-<ref|va|va-webkit>.png (committed copies are palette-quantized, see README).
  */
 const OUT = process.env.FIDELITY_OUT ?? 'docs/fidelity';
-const NP_URL = 'http://localhost:3000/';
+const REF_URL = 'http://localhost:3000/';
 const VA_URL = 'http://localhost:1431/';
 
 const RESPONSE_BODY = JSON.stringify(
@@ -88,7 +88,7 @@ const environments = [
 ];
 
 type Theme = 'light' | 'dark';
-type Target = 'np' | 'va';
+type Target = 'ref' | 'va';
 
 /** Seeds the same workspace into either app before it boots. */
 async function boot(page: Page, target: Target, theme: Theme) {
@@ -97,17 +97,19 @@ async function boot(page: Page, target: Target, theme: Theme) {
     collections,
     environments,
     theme,
+    // localStorage key prefix of the reference app.
+    prefix: process.env.REF_STORAGE_PREFIX ?? 'reference-app',
     body: RESPONSE_BODY,
     longValue: 'eyJsYW5nIjoiZW4iLCJ0aGVtZSI6ImRhcmsiLCJsYXlvdXQiOiJjb21wYWN0In0.' + 'a1b2c3d4'.repeat(12),
   };
-  if (target === 'np') {
+  if (target === 'ref') {
     await page.addInitScript((s) => {
-      localStorage.setItem('next-postman-collections', JSON.stringify(s.collections));
-      localStorage.setItem('next-postman-environments', JSON.stringify(s.environments));
-      localStorage.setItem('next-postman-active-env', JSON.stringify('env-1'));
-      localStorage.setItem('next-postman-theme', JSON.stringify(s.theme));
+      localStorage.setItem(`${s.prefix}-collections`, JSON.stringify(s.collections));
+      localStorage.setItem(`${s.prefix}-environments`, JSON.stringify(s.environments));
+      localStorage.setItem(`${s.prefix}-active-env`, JSON.stringify('env-1'));
+      localStorage.setItem(`${s.prefix}-theme`, JSON.stringify(s.theme));
       localStorage.setItem(
-        'next-postman-cookies',
+        `${s.prefix}-cookies`,
         JSON.stringify({
           'httpbin.org': [
             { name: 'session', value: 'abc123' },
@@ -124,7 +126,7 @@ async function boot(page: Page, target: Target, theme: Theme) {
       }),
     );
     await page.routeWebSocket(/echo\.test/, (ws) => ws.onMessage((m) => ws.send(m)));
-    await page.goto(NP_URL);
+    await page.goto(REF_URL);
   } else {
     await page.addInitScript((s) => {
       window.__VECTIS_MOCK__ = {
@@ -165,7 +167,7 @@ async function boot(page: Page, target: Target, theme: Theme) {
 }
 
 async function shot(page: Page, name: string) {
-  // Let transitions/caret settle; hide the blinking caret (and Next's dev-only indicator on NP).
+  // Let transitions/caret settle; hide the blinking caret (and Next's dev-only indicator on REF).
   await page.addStyleTag({
     content: '*{caret-color:transparent !important;transition:none !important} nextjs-portal{display:none !important}',
   });
@@ -227,11 +229,11 @@ mkdirSync(OUT, { recursive: true });
 
 for (const theme of ['light', 'dark'] as const) {
   for (const [state, run] of Object.entries(states)) {
-    for (const target of ['np', 'va'] as const) {
+    for (const target of ['ref', 'va'] as const) {
       test(`${state} ${theme} ${target}`, async ({ page, browserName }) => {
         test.skip(
-          target === 'np' && (browserName !== 'chromium' || process.env.FIDELITY_NP === '0'),
-          'NP shots: Chromium only',
+          target === 'ref' && (browserName !== 'chromium' || process.env.FIDELITY_REF === '0'),
+          'REF shots: Chromium only',
         );
         await boot(page, target, theme);
         await run(page);

@@ -1,5 +1,5 @@
-//! Server-Sent Events: an incremental byte-level parser (WHATWG event-stream, ported from
-//! next-postman's `parseSse.ts`) and the stream task built on the shared reqwest client.
+//! Server-Sent Events: an incremental byte-level parser (WHATWG event-stream, mirroring
+//! the UI's `parseSse.ts`) and the stream task built on the shared reqwest client.
 
 use std::sync::Arc;
 use std::time::Duration;

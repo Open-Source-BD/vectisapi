@@ -2,15 +2,15 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Port next-postman into VectisAPI, an offline Tauri 2 desktop API client with a Rust core, identical UI, and SQLite storage.
+**Goal:** Port the original web app into VectisAPI, an offline Tauri 2 desktop API client with a Rust core, identical UI, and SQLite storage.
 
-**Architecture:** The React UI from next-postman (commit `ae84135`) is copied verbatim into a Vite app. Every browser/Next.js network and storage path is replaced by Tauri commands backed by a pure-Rust crate `vectis-core` (reqwest HTTP engine, tokio-tungstenite WS, SSE, cookie_store jar, rusqlite DB on its own thread). `src-tauri` is a thin command layer. Large bodies stay in Rust; the UI receives a 2 MB prefix as raw bytes.
+**Architecture:** The React UI from the original web app (commit `ae84135`) is copied verbatim into a Vite app. Every browser/Next.js network and storage path is replaced by Tauri commands backed by a pure-Rust crate `vectis-core` (reqwest HTTP engine, tokio-tungstenite WS, SSE, cookie_store jar, rusqlite DB on its own thread). `src-tauri` is a thin command layer. Large bodies stay in Rust; the UI receives a 2 MB prefix as raw bytes.
 
 **Tech Stack:** Tauri 2.12.x, Rust 1.96 (MSRV 1.90), tokio, reqwest 0.13 (rustls), tokio-tungstenite, cookie_store, rusqlite (bundled, FTS5), axum (tests only), Vite + React 19 + TypeScript + Zustand 5, Vitest, Playwright.
 
 **Spec:** `docs/superpowers/specs/2026-11-10-vectisapi-design.md` (read it before any task).
 
-**Source app:** `~/shaon/next-postman` (read-only). Paths below written `NP:src/...` refer to it.
+**Source app:** `~/shaon/reference-app` (read-only). Paths below written `REF:src/...` refer to it.
 
 ## Global Constraints
 
@@ -26,7 +26,7 @@
 - Cookies: RFC 6265 via `cookie_store`; the jar's cookies are attached unless the request has its own `Cookie` header.
 - Release profile: `lto = "fat"`, `codegen-units = 1`, `opt-level = 3`, `strip = true`, `panic = "abort"`.
 - `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check` clean; `npm run typecheck`, `npm run lint`, `npm test` green after every task.
-- License MIT; keep next-postman's copyright line in LICENSE.
+- License MIT; keep the original app's copyright line in LICENSE.
 - Commit messages: Conventional Commits, ending with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## Review Focus
@@ -67,12 +67,12 @@ src-tauri/
   src/commands/{http,realtime,db,cookies,settings,files}.rs
 index.html
 vite.config.ts, tsconfig.json, vitest.config.ts, eslint.config.mjs, package.json
-src/main.tsx                     # replaces NP:src/app/page.tsx + layout.tsx
-src/app/*.css                    # verbatim from NP
-src/components/ui/*              # verbatim from NP
-src/features/api-client/**       # from NP, modified per tasks below
-src/features/api-client/lib/native/  # NEW: tauri bridge (invoke wrappers, decoders)
-src/features/api-client/lib/scriptWorker.ts, scriptHost.ts  # NEW
+src/main.tsx                     # replaces REF:src/app/page.tsx + layout.tsx
+src/app/*.css                    # verbatim from REF
+src/components/ui/*              # verbatim from REF
+src/features/vectisapi/**       # from REF, modified per tasks below
+src/features/vectisapi/lib/native/  # NEW: tauri bridge (invoke wrappers, decoders)
+src/features/vectisapi/lib/scriptWorker.ts, scriptHost.ts  # NEW
 .github/workflows/ci.yml, release.yml
 ```
 
@@ -82,18 +82,18 @@ src/features/api-client/lib/scriptWorker.ts, scriptHost.ts  # NEW
 
 **Files:**
 - Create: `Cargo.toml`, `src-tauri/**`, `crates/vectis-core/{Cargo.toml,src/lib.rs}`, `index.html`, `vite.config.ts`, `package.json`, `tsconfig.json`, `vitest.config.ts`, `eslint.config.mjs`, `.prettierrc`, `.gitignore`, `src/main.tsx`, `LICENSE`, `README.md`
-- Copy verbatim: `NP:src/app/*.css` → `src/app/`, `NP:src/components/**` → `src/components/`, `NP:src/features/**` → `src/features/`, `NP:src/types/**` → `src/types/`, `NP:.prettierrc`
-- Do not copy: `NP:src/app/api/**`, `NP:src/app/layout.tsx`, `NP:src/app/page.tsx`, storybook, husky, `next.config.mjs`
+- Copy verbatim: `REF:src/app/*.css` → `src/app/`, `REF:src/components/**` → `src/components/`, `REF:src/features/**` → `src/features/`, `REF:src/types/**` → `src/types/`, `REF:.prettierrc`
+- Do not copy: `REF:src/app/api/**`, `REF:src/app/layout.tsx`, `REF:src/app/page.tsx`, storybook, husky, `next.config.mjs`
 
 **Interfaces:**
 - Produces: `npm run tauri dev` opens the app; `@/` alias → `src/`; `window.__TAURI_INTERNALS__` present at runtime.
 
 - [ ] **Step 1:** `npm create tauri-app@latest` equivalent by hand: Vite React-TS frontend + `src-tauri`, identifier `dev.vectisapi.app`, productName `VectisAPI`, window title `VectisAPI`, 1280×800 min 960×600. Workspace `Cargo.toml` with members `crates/vectis-core`, `src-tauri` and the release profile from Global Constraints.
-- [ ] **Step 2:** Copy the NP files listed above. `src/main.tsx` renders `<ApiClient />` inside `React.StrictMode`, imports `./app/globals.css` and the fonts. Remove `'use client'` directives (harmless but drop them). Replace `next/font` with `@fontsource/roboto` (400, 500, 700), `@fontsource/fira-code` (400, 500) and the `material-symbols` package (outlined). In `index.html`/CSS set `--font-roboto: 'Roboto'` and `--font-fira-code: 'Fira Code'` on `:root` so `globals.css` is unchanged. `index.html` title `VectisAPI`.
-- [ ] **Step 3:** Port `vitest.config.ts` (jsdom), `tsconfig.json` paths, ESLint (drop `eslint-config-next`, use `typescript-eslint` + `eslint-plugin-react-hooks`). Copy all NP `*.test.ts`.
+- [ ] **Step 2:** Copy the REF files listed above. `src/main.tsx` renders `<VectisApi />` inside `React.StrictMode`, imports `./app/globals.css` and the fonts. Remove `'use client'` directives (harmless but drop them). Replace `next/font` with `@fontsource/roboto` (400, 500, 700), `@fontsource/fira-code` (400, 500) and the `material-symbols` package (outlined). In `index.html`/CSS set `--font-roboto: 'Roboto'` and `--font-fira-code: 'Fira Code'` on `:root` so `globals.css` is unchanged. `index.html` title `VectisAPI`.
+- [ ] **Step 3:** Port `vitest.config.ts` (jsdom), `tsconfig.json` paths, ESLint (drop `eslint-config-next`, use `typescript-eslint` + `eslint-plugin-react-hooks`). Copy all REF `*.test.ts`.
 - [ ] **Step 4:** Run `npm run typecheck && npm test`. Expected: PASS (all copied tests still pass; network-dependent code is untouched so far).
-- [ ] **Step 5:** Set CSP in `tauri.conf.json`: `default-src 'self'; script-src 'self'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; connect-src ipc: http://ipc.localhost`. Run `npm run tauri dev`; app window shows the empty state identical to `NP` `npm run dev` (compare by screenshot). Confirm in devtools Network: zero external requests.
-- [ ] **Step 6:** Commit `chore: scaffold tauri app and port next-postman ui`.
+- [ ] **Step 5:** Set CSP in `tauri.conf.json`: `default-src 'self'; script-src 'self'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; connect-src ipc: http://ipc.localhost`. Run `npm run tauri dev`; app window shows the empty state identical to `REF` `npm run dev` (compare by screenshot). Confirm in devtools Network: zero external requests.
+- [ ] **Step 6:** Commit `chore: scaffold tauri app and port the original web app ui`.
 
 ### Task 2: HTTP engine in `vectis-core`
 
@@ -232,8 +232,8 @@ src/features/api-client/lib/scriptWorker.ts, scriptHost.ts  # NEW
       pub fn close(&self, conn_id: &str); pub fn close_all(&self); }
   pub struct SseParser; impl SseParser { pub fn new() -> Self; pub fn push(&mut self, chunk: &[u8]) -> Vec<SseFrame>; }
   ```
-  Opening an already-open `conn_id` is a no-op (idempotent, like NP `openWebSocket`). Binary WS frames: `text` = `[binary N bytes]`, `binary: true` (matches NP display).
-- [ ] **Step 1: Failing tests:** port every case from `NP:src/features/api-client/lib/parseSse.test.ts` to `sse_parser_*` Rust tests (multi-line data, `event`, `id`, `retry`, comments, CRLF, chunk splits mid-line, UTF-8 split across chunks); `ws_echo_with_custom_headers_and_subprotocol` (axum WS server asserts `Authorization` header and `Sec-WebSocket-Protocol`); `ws_binary_frame_reported`; `ws_close_code_reason`; `ws_open_idempotent`; `sse_stream_events_and_last_event_id_sent`; `sse_non_2xx_is_error_event`; `close_stops_events`.
+  Opening an already-open `conn_id` is a no-op (idempotent, like REF `openWebSocket`). Binary WS frames: `text` = `[binary N bytes]`, `binary: true` (matches REF display).
+- [ ] **Step 1: Failing tests:** port every case from `REF:src/features/vectisapi/lib/parseSse.test.ts` to `sse_parser_*` Rust tests (multi-line data, `event`, `id`, `retry`, comments, CRLF, chunk splits mid-line, UTF-8 split across chunks); `ws_echo_with_custom_headers_and_subprotocol` (axum WS server asserts `Authorization` header and `Sec-WebSocket-Protocol`); `ws_binary_frame_reported`; `ws_close_code_reason`; `ws_open_idempotent`; `sse_stream_events_and_last_event_id_sent`; `sse_non_2xx_is_error_event`; `close_stops_events`.
 - [ ] **Step 2–4:** Run/implement (tokio-tungstenite with `rustls-tls-native-roots`; build `http::Request` via `IntoClientRequest` and append headers; WS honors `verify_tls` by building a rustls `Connector`)/pass.
 - [ ] **Step 5:** Commit `feat(core): websocket and sse clients`.
 
@@ -263,7 +263,7 @@ src/features/api-client/lib/scriptWorker.ts, scriptHost.ts  # NEW
 ### Task 8: Frontend native transport (replace proxy pipeline)
 
 **Files:**
-- Create: `src/features/api-client/lib/native/{invoke.ts,buildRequestSpec.ts,decodeResponse.ts,buildRequestSpec.test.ts,decodeResponse.test.ts}`
+- Create: `src/features/vectisapi/lib/native/{invoke.ts,buildRequestSpec.ts,decodeResponse.ts,buildRequestSpec.test.ts,decodeResponse.test.ts}`
 - Modify: `lib/executeRequest.ts`, `lib/sendActive.ts`, `lib/collectionRunner.ts`, `types/http.ts`, `types/tab.ts`, `store/slices/tabsSlice.ts` (line ~208 cookie usage), `store/slices/collectionsSlice.ts` (cookieJar), `components/response/ResponsePane.tsx` (remove challenge panel lines ~170–210), `components/modals/CookiesModal.tsx`
 - Delete: `lib/proxyClient.ts(+test)`, `lib/botWall.ts(+test)`, `lib/buildProxyRequest.ts(+test, after porting its cases)`, `lib/cookies.ts` jar functions (keep `parseSetCookie` only if still used), `ChallengeInfo` type
 
@@ -285,8 +285,8 @@ src/features/api-client/lib/scriptWorker.ts, scriptHost.ts  # NEW
   ```
   `ResponseData.headers` stays `Record<string,string>`: values joined with `, `, except `set-cookie` joined with `\n`. `rawText` = `TextDecoder('utf-8', {fatal:false})` of prefix. `timeTaken` = `Math.round(timing.totalMs)`. `size` = meta.size. `ok` = 200–299. `transport` field removed.
   `executeRequest(tab, seedVars, opts)` keeps its signature minus `directFallback`/`forceDirect`/`cookieHeader`; `ExecuteResult` loses `challenge`. External `signal` abort → `cancelRequest(requestId)`. Timeout passed into the spec (Rust enforces it); default from settings.
-  Error response mapping (keep NP's shape): `{ ok:false, status:0, statusText:'Error', rawText: message, errorKind: kind }`.
-- [ ] **Step 1: Failing tests:** port every assertion in `NP:lib/buildProxyRequest.test.ts` to `buildRequestSpec.test.ts` (6 auth types, params appended, env resolution, raw/json/urlencoded/graphql bodies, Content-Type defaults, formdata). New: `basic auth base64 handles unicode` (UTF-8 then base64), `headers keep duplicates in order`, `GET with body type raw sends no body` (BODY_METHODS rule preserved), `formdata file item emits File part with path`. `decodeResponse.test.ts`: `decodes frame`, `joins duplicate headers`, `set-cookie joined with newline`, `invalid utf8 prefix decodes lossily`. `executeRequest.test.ts` rewritten with `vi.mock('./native/invoke')`: `unresolved var url yields error response` (Rust returns `invalid_url` → status 0 response, no throw), `tests receive full body when truncated` (mock `getResponseBody` called once when `tab.tests` non-empty and `truncated`), `abort signal cancels`.
+  Error response mapping (keep REF's shape): `{ ok:false, status:0, statusText:'Error', rawText: message, errorKind: kind }`.
+- [ ] **Step 1: Failing tests:** port every assertion in `REF:lib/buildProxyRequest.test.ts` to `buildRequestSpec.test.ts` (6 auth types, params appended, env resolution, raw/json/urlencoded/graphql bodies, Content-Type defaults, formdata). New: `basic auth base64 handles unicode` (UTF-8 then base64), `headers keep duplicates in order`, `GET with body type raw sends no body` (BODY_METHODS rule preserved), `formdata file item emits File part with path`. `decodeResponse.test.ts`: `decodes frame`, `joins duplicate headers`, `set-cookie joined with newline`, `invalid utf8 prefix decodes lossily`. `executeRequest.test.ts` rewritten with `vi.mock('./native/invoke')`: `unresolved var url yields error response` (Rust returns `invalid_url` → status 0 response, no throw), `tests receive full body when truncated` (mock `getResponseBody` called once when `tab.tests` non-empty and `truncated`), `abort signal cancels`.
 - [ ] **Step 2:** `npm test` → FAIL. **Step 3:** Implement; delete the browser-only modules and their UI. CookiesModal reads `cookies_list` on open and calls the delete/clear commands; layout unchanged, adds `path` (when ≠ `/`) and an expiry hint using existing muted-text classes. `captureCookies` and `cookieJar` removed from store. **Step 4:** `npm test && npm run typecheck` PASS; manual: send GET to `http://localhost:<port>` and to `https://httpbin.org/anything` in `tauri dev`. **Step 5:** Commit `feat(ui): native rust transport replaces proxy`.
 
 ### Task 9: Form-data file parts by path
@@ -294,17 +294,17 @@ src/features/api-client/lib/scriptWorker.ts, scriptHost.ts  # NEW
 **Files:** Modify `types/http.ts` (`KvItem.filePath?: string; fileName?: string` — `file: File` removed), `components/tabs/BodyTab.tsx`, `components/ui/KvEditor.tsx` (file cell), `lib/native/buildRequestSpec.ts`
 
 - [ ] **Step 1: Failing test** `KvEditor file cell shows chosen file name` and `buildRequestSpec emits PartValue.File with filePath` (vitest; dialog mocked).
-- [ ] **Step 2–4:** File cell button opens `@tauri-apps/plugin-dialog` `open({ multiple:false })`, stores path + basename; same visuals as NP's file input. Persisted tabs now keep the file reference (NP dropped it). Pass.
+- [ ] **Step 2–4:** File cell button opens `@tauri-apps/plugin-dialog` `open({ multiple:false })`, stores path + basename; same visuals as REF's file input. Persisted tabs now keep the file reference (REF dropped it). Pass.
 - [ ] **Step 5:** Commit `feat(ui): form-data files sent from disk by path`.
 
 ### Task 10: SQLite-backed persistence
 
-**Files:** Create `src/features/api-client/store/persistNative.ts`, `persistNative.test.ts`; Delete `store/persist.ts`; Modify `ApiClient.tsx` (use `usePersistence` from new file), `store/slices/historySlice.ts` (cap from settings), `components/sidebar/HistoryPanel.tsx` (search via `search_history` when query non-empty; virtualized list)
+**Files:** Create `src/features/vectisapi/store/persistNative.ts`, `persistNative.test.ts`; Delete `store/persist.ts`; Modify `VectisApi.tsx` (use `usePersistence` from new file), `store/slices/historySlice.ts` (cap from settings), `components/sidebar/HistoryPanel.tsx` (search via `search_history` when query non-empty; virtualized list)
 
 **Interfaces:**
 - Consumes: `load_workspace`, `save_entities`, `add_history`, `search_history`.
-- Produces: `export function usePersistence(): void` (same name as NP); `export function diffToOps(prev: StoreState, next: StoreState): EntityOp[]`; `export function flushNow(): Promise<void>`.
-- [ ] **Step 1: Failing tests:** `diffToOps emits only changed collection` (reference equality like NP), `deleted environment emits DeleteEnvironment`, `tabs strip response and prevResponse`, `debounces 300ms per entity` (fake timers: 3 edits in 200 ms → 1 save_entities call), `flush on close writes pending entities` (pending op + `vectis://flush` event → save called immediately, then `flush_done`), `hydrate failure starts clean and marks hydrated`.
+- Produces: `export function usePersistence(): void` (same name as REF); `export function diffToOps(prev: StoreState, next: StoreState): EntityOp[]`; `export function flushNow(): Promise<void>`.
+- [ ] **Step 1: Failing tests:** `diffToOps emits only changed collection` (reference equality like REF), `deleted environment emits DeleteEnvironment`, `tabs strip response and prevResponse`, `debounces 300ms per entity` (fake timers: 3 edits in 200 ms → 1 save_entities call), `flush on close writes pending entities` (pending op + `vectis://flush` event → save called immediately, then `flush_done`), `hydrate failure starts clean and marks hydrated`.
 - [ ] **Step 2–4:** Implement. History: `addHistory` in store also calls `add_history` (not via diff). Cap = `settings.historyLimit`. Pass.
 - [ ] **Step 5:** Commit `feat(ui): sqlite persistence`.
 
@@ -322,14 +322,14 @@ src/features/api-client/lib/scriptWorker.ts, scriptHost.ts  # NEW
   ```
   Worker created with `new Worker(new URL('./scriptWorker.ts', import.meta.url), { type: 'module' })`, reused; on timeout `terminate()` and recreate; result `error: 'Script timed out after 5s'`. Empty/whitespace code short-circuits without touching the worker (keeps the < 5 ms overhead target).
 - [ ] **Step 1: Failing tests** (vitest with `@vitest/web-worker`): `pre-request sets var visible to request`, `pm.test results returned`, `infinite loop times out and next run works`, `script cannot access window/document` (`typeof document === 'undefined'` inside), `empty script does not spawn worker`. Keep all existing `pmSandbox.test.ts` passing.
-- [ ] **Step 2–4:** Implement; `executeRequest` awaits `runScript` for both phases; `onSetVar` invoked for each `setVars`. Replace NP's `alert('Pre-request Script Error…')` in `sendActive.ts` with the error shown as the response (status 0, statusText `Script Error`) — no blocking dialogs. Pass.
+- [ ] **Step 2–4:** Implement; `executeRequest` awaits `runScript` for both phases; `onSetVar` invoked for each `setVars`. Replace REF's `alert('Pre-request Script Error…')` in `sendActive.ts` with the error shown as the response (status 0, statusText `Script Error`) — no blocking dialogs. Pass.
 - [ ] **Step 5:** Commit `feat(ui): sandboxed script worker with timeout`.
 
 ### Task 12: Realtime UI on Rust
 
 **Files:** Modify `lib/realtimeConnection.ts` (same exported functions: `isConnected`, `openWebSocket`, `sendWebSocket`, `closeConnection`, `openSse`), its test, `components/realtime/RealtimePane.tsx` (virtualized log), store subscription closing connections for removed tab ids.
 
-- [ ] **Step 1: Failing tests** (invoke + Channel mocked): `openWebSocket passes headers and protocols to rt_open_ws`, `events map to RtHandlers`, `stale generation ignored after reconnect`, `closing tab closes connection` (incl. NP's last-tab replacement path in `closeTab`), `log capped at 5000 messages or 20MB`.
+- [ ] **Step 1: Failing tests** (invoke + Channel mocked): `openWebSocket passes headers and protocols to rt_open_ws`, `events map to RtHandlers`, `stale generation ignored after reconnect`, `closing tab closes connection` (incl. REF's last-tab replacement path in `closeTab`), `log capped at 5000 messages or 20MB`.
 - [ ] **Step 2–4:** `openWebSocket(tabId, url, protocols, handlers, headers?)` gains optional headers (from tab headers + auth, built with `buildRequestSpec` header logic). SSE builds an `HttpRequestSpec` and calls `rt_open_sse` with `lastEventId`. Pass.
 - [ ] **Step 5:** Commit `feat(ui): realtime over rust ws/sse`.
 
@@ -341,13 +341,13 @@ src/features/api-client/lib/scriptWorker.ts, scriptHost.ts  # NEW
 - [ ] **Step 2–4:** `CodeView` switches to `VirtualLines` above 5,000 lines, keeping the same line-number/token styling classes. Syntax highlight per visible line chunk. JSON tree for truncated responses only after "Load full body". Pass; manual check in `tauri dev` with a 50 MB JSON from a local server: first paint < 300 ms, scrolling smooth.
 - [ ] **Step 5:** Commit `feat(ui): virtualized large response bodies`.
 
-### Task 14: Settings modal, backup, next-postman migration
+### Task 14: Settings modal, backup, the original web app migration
 
 **Files:** Create `components/modals/SettingsModal.tsx` (+test), `lib/native/backup.ts`; Replace `components/WorkspaceChip.tsx` with `SettingsChip.tsx`; Modify `TopBar.tsx`; Keep `lib/workspaceFile.ts` (import-only), delete `lib/workspaceFs.ts`, `lib/zipWorkspace.ts` writing paths (keep zip *reading*).
 
-- [ ] **Step 1: Failing tests:** `SettingsChip renders in TopBar with chip classes and 'Settings' label`; `SettingsModal saves timeout/redirects/verify TLS/proxy/user agent/store cap/history limit` → `set_settings` payload; `history limit clamps to 50–10000`; `import next-postman workspace zip populates collections and environments` (use NP `workspaceFile.test.ts` fixtures); `backup export then import restores everything`.
-- [ ] **Step 2–4:** Modal reuses EnvModal's structure/classes. Buttons: "Export all", "Import all" (accepts `.json` backup, next-postman workspace `.zip`, or a folder), "Open data folder". Pass.
-- [ ] **Step 5:** Commit `feat(ui): settings modal, backup and next-postman import`.
+- [ ] **Step 1: Failing tests:** `SettingsChip renders in TopBar with chip classes and 'Settings' label`; `SettingsModal saves timeout/redirects/verify TLS/proxy/user agent/store cap/history limit` → `set_settings` payload; `history limit clamps to 50–10000`; `import the original web app workspace zip populates collections and environments` (use REF `workspaceFile.test.ts` fixtures); `backup export then import restores everything`.
+- [ ] **Step 2–4:** Modal reuses EnvModal's structure/classes. Buttons: "Export all", "Import all" (accepts `.json` backup, the original web app workspace `.zip`, or a folder), "Open data folder". Pass.
+- [ ] **Step 5:** Commit `feat(ui): settings modal, backup and the original web app import`.
 
 ### Task 15: Timing popover
 
@@ -359,9 +359,9 @@ src/features/api-client/lib/scriptWorker.ts, scriptHost.ts  # NEW
 
 **Files:** Create `.github/workflows/ci.yml`, `.github/workflows/release.yml`, `e2e/*.spec.ts` (ported, with `src/test/mockTauri.ts` installing `@tauri-apps/api/mocks` `mockIPC`), `docs/perf.md`, `docs/fidelity/`; Update `README.md`
 
-- [ ] **Step 1:** Port NP's 7 Playwright specs to run against `vite dev` with `mockIPC` (send returns a canned frame). `npm run test:e2e` PASS.
-- [ ] **Step 2:** Fidelity: screenshot NP (`npm run dev`, Chromium 1280×800) and VectisAPI (`tauri dev`) for the 7 states in spec §6.1 (light + dark). Save pairs in `docs/fidelity/`. Any visible difference outside the allowed list is a bug to fix in this step.
+- [ ] **Step 1:** Port REF's 7 Playwright specs to run against `vite dev` with `mockIPC` (send returns a canned frame). `npm run test:e2e` PASS.
+- [ ] **Step 2:** Fidelity: screenshot REF (`npm run dev`, Chromium 1280×800) and VectisAPI (`tauri dev`) for the 7 states in spec §6.1 (light + dark). Save pairs in `docs/fidelity/`. Any visible difference outside the allowed list is a bug to fix in this step.
 - [ ] **Step 3:** Perf: measure and record in `docs/perf.md` on a release build: cold start, per-request overhead (local server, median of 100), 50 MB body first paint, 10k history search, idle RAM, installer size. Each must meet Global Constraints; fix or file what fails.
 - [ ] **Step 4:** CI: `check` job (fmt, clippy, cargo test, typecheck, lint, vitest, e2e) on ubuntu; `build` matrix `macos-latest`, `windows-latest`, `ubuntu-22.04` with `tauri-apps/tauri-action` producing dmg / msi+nsis / AppImage+deb, unsigned. Linux deps: `libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev`.
-- [ ] **Step 5:** README: features, install, build from source, the Linux `WEBKIT_DISABLE_DMABUF_RENDERER=1` note, data location, migration from next-postman. LICENSE with both copyright lines.
+- [ ] **Step 5:** README: features, install, build from source, the Linux `WEBKIT_DISABLE_DMABUF_RENDERER=1` note, data location, migration from the original web app. LICENSE with both copyright lines.
 - [ ] **Step 6:** Commit `chore: ci, release builds, fidelity and perf docs`.

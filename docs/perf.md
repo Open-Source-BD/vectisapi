@@ -51,7 +51,7 @@ measurable headlessly; it is one raw-bytes IPC call per send (no JSON encoding o
 `e2e/tools/large-body.spec.ts`:
 
 ```sh
-FIDELITY_NP=0 npx playwright test -c playwright.tools.config.ts large-body
+FIDELITY_REF=0 npx playwright test -c playwright.tools.config.ts large-body
 ```
 
 The built UI (`vite build --mode e2e`) with `mockTauri` answering `send_request` exactly as Rust
@@ -75,7 +75,7 @@ real app; see `docs/manual-smoke.md` §5).
 for the history snapshot (`JSON.parse(JSON.stringify(tab))`), and stored it in history. After
 "Load full body" that was 100+ MB of JSON per send, and the body was written into SQLite. Same
 spec, run before the fix ("send replacing a fully loaded 50 MB view", 3×): Chromium 315, 749,
-798 ms; WebKit 316, 814, 724 ms. The snapshot now drops both responses before cloning (`src/features/api-client/lib/sendActive.ts`,
+798 ms; WebKit 316, 814, 724 ms. The snapshot now drops both responses before cloning (`src/features/vectisapi/lib/sendActive.ts`,
 covered by `sendActive.test.ts`).
 
 ### History search, 10k entries

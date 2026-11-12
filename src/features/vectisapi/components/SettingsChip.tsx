@@ -1,6 +1,6 @@
 import { useApiStore } from '../store/useApiStore';
 
-/** TopBar chip (where next-postman's workspace chip sat) that opens the Settings modal. */
+/** TopBar chip that opens the Settings modal. */
 export function SettingsChip() {
   const setOpen = useApiStore((s) => s.setSettingsModalOpen);
   return (

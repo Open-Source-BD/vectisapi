@@ -24,7 +24,7 @@ export function HistoryPanel() {
   const replayHistory = useApiStore((s) => s.replayHistory);
   const openSaveModalForHistory = useApiStore((s) => s.openSaveModalForHistory);
 
-  // The whole (capped) history is in memory; next-postman's substring filter over 10k items takes
+  // The whole (capped) history is in memory; a substring filter over 10k items takes
   // milliseconds, so there is no round trip to SQLite.
   const filtered = useMemo(() => filterHistory(history, search), [history, search]);
 

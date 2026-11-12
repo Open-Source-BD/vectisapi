@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { pickFile } from '@/features/api-client/lib/native/invoke';
+import { pickFile } from '@/features/vectisapi/lib/native/invoke';
 
 interface KvItem {
   id: string;

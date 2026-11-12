@@ -1,5 +1,5 @@
 //! WebSocket + SSE client tests against a local axum server, plus `SseParser` unit cases
-//! ported from next-postman's `parseSse.test.ts`.
+//! mirroring the UI's `parseSse.test.ts`.
 
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};

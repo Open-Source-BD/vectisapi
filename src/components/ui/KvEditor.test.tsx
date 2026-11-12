@@ -1,10 +1,10 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { pickFile } from '@/features/api-client/lib/native/invoke';
+import { pickFile } from '@/features/vectisapi/lib/native/invoke';
 import { KvEditor } from './KvEditor';
 
-vi.mock('@/features/api-client/lib/native/invoke', () => ({ pickFile: vi.fn() }));
+vi.mock('@/features/vectisapi/lib/native/invoke', () => ({ pickFile: vi.fn() }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

@@ -24,7 +24,7 @@ import { exportData, parseImportFile } from './lib/importExport';
 import { usePersistence } from './store/persistNative';
 import { selectActiveTab, useApiStore } from './store/useApiStore';
 
-export function ApiClient() {
+export function VectisApi() {
   usePersistence();
   const hydrated = useApiStore((s) => s.hydrated);
   const theme = useApiStore((s) => s.theme);

@@ -1,4 +1,4 @@
-//! Reading a next-postman workspace (its exported `.zip` or its git folder) for migration.
+//! Reading a workspace (its exported `.zip` or its git folder) for migration.
 //! Rust only collects the `*.json` files; the frontend parses them (`lib/workspaceFile.ts`).
 
 use std::fs::File;
@@ -14,10 +14,10 @@ use crate::state::AppState;
 
 /// Upper bound on the summed size of the `*.json` files read from one workspace.
 const MAX_TOTAL_BYTES: u64 = 50 * 1024 * 1024;
-/// Deepest directory level read from a folder (the root's entries are level 1). next-postman
+/// Deepest directory level read from a folder (the root's entries are level 1). A workspace
 /// nests one directory per collection folder, so this has to allow nested folders.
 const MAX_DEPTH: usize = 16;
-const ZIP_FILTERS: &[Filter] = &[("next-postman workspace", &["zip"])];
+const ZIP_FILTERS: &[Filter] = &[("Workspace archive", &["zip"])];
 
 /// Where the workspace comes from.
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -35,22 +35,22 @@ pub struct WorkspaceFile {
     pub text: String,
 }
 
-/// Asks for a next-postman workspace zip or folder and returns its `*.json` files sorted by
+/// Asks for a workspace zip or folder and returns its `*.json` files sorted by
 /// path, or `None` if the user cancelled. Errors with "Workspace too large" past 50 MB.
 #[tauri::command]
-pub async fn pick_next_postman_workspace(
+pub async fn pick_workspace_files(
     state: State<'_, AppState>,
     source: WorkspaceSource,
 ) -> Result<Option<Vec<WorkspaceFile>>, CoreError> {
     let request = match source {
         WorkspaceSource::Zip => PickRequest {
             kind: PickKind::Open,
-            title: "Import next-postman workspace (zip)",
+            title: "Import workspace (zip)",
             filters: ZIP_FILTERS,
         },
         WorkspaceSource::Folder => PickRequest {
             kind: PickKind::Folder,
-            title: "Import next-postman workspace folder",
+            title: "Import workspace folder",
             filters: &[],
         },
     };
@@ -197,7 +197,7 @@ mod tests {
     const ENV: &str = "environments/000__Prod.json";
     const ENV_SECRET: &str = "environments/000__Prod.secret.json";
 
-    /// next-postman's layout plus files that must be skipped.
+    /// The workspace layout plus files that must be skipped.
     fn fixture() -> Vec<(&'static str, &'static str)> {
         vec![
             (COLLECTION, r#"{"id":"c1","name":"API"}"#),
@@ -298,17 +298,13 @@ mod tests {
         let call = |source: &str| {
             invoke(
                 &webview,
-                "pick_next_postman_workspace",
+                "pick_workspace_files",
                 json!({ "source": source }),
             )
         };
 
         assert_eq!(
-            invoke_json(
-                &webview,
-                "pick_next_postman_workspace",
-                json!({ "source": "zip" })
-            ),
+            invoke_json(&webview, "pick_workspace_files", json!({ "source": "zip" })),
             Value::Null
         );
 

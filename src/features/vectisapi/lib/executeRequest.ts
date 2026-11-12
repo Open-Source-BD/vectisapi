@@ -25,7 +25,7 @@ export interface ExecuteOptions {
   timeoutMs?: number;
 }
 
-/** next-postman's error-response shape, plus the native error kind. */
+/** The error-response shape the UI renders, plus the native error kind. */
 function errorResponse(kind: string, message: string): ResponseData {
   return {
     ok: false,

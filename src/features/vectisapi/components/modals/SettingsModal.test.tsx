@@ -12,7 +12,7 @@ vi.mock('../../lib/native/invoke', async (orig) => ({
   loadWorkspace: vi.fn(),
   saveEntities: vi.fn(),
   openDataDir: vi.fn(),
-  pickNextPostmanWorkspace: vi.fn(),
+  pickWorkspaceFiles: vi.fn(),
 }));
 
 import {
@@ -21,7 +21,7 @@ import {
   importBackup,
   loadWorkspace,
   openDataDir,
-  pickNextPostmanWorkspace,
+  pickWorkspaceFiles,
   saveEntities,
   setSettings,
   type Settings,
@@ -50,7 +50,7 @@ const defaults = (): Settings => ({
 
 const col = (id: string, name = id) => ({ id, name, children: [], date: '2020-01-01T00:00:00.000Z' }) as Collection;
 
-/** The next-postman workspace from NP's workspaceFile.test.ts `sample()`. */
+/** The workspace from workspaceFile.test.ts `sample()`. */
 const npSample = (): WorkspaceData => ({
   collections: [
     {
@@ -222,7 +222,7 @@ describe('Settings chip and modal', () => {
     expect(useApiStore.getState().isSettingsModalOpen).toBe(true);
   });
 
-  it('import next-postman workspace zip populates collections and environments', async () => {
+  it('import workspace zip populates collections and environments', async () => {
     useApiStore.setState({
       collections: [col('mine')],
       globals: [{ id: 'gx', key: 'apiKey', value: 'already-set' }],
@@ -230,10 +230,10 @@ describe('Settings chip and modal', () => {
     // As Rust returns it: an OS-made zip adds a top folder; secrets live in *.secret.json.
     const files = serializeWorkspace(npSample()).map((f) => ({ path: `my-ws/${f.path}`, text: f.content }));
     expect(files.some((f) => f.path.endsWith('.secret.json'))).toBe(true);
-    vi.mocked(pickNextPostmanWorkspace).mockResolvedValue(files);
+    vi.mocked(pickWorkspaceFiles).mockResolvedValue(files);
     open();
-    await click(button('Import next-postman workspace (zip)'));
-    expect(pickNextPostmanWorkspace).toHaveBeenCalledWith('zip');
+    await click(button('Import workspace (zip)'));
+    expect(pickWorkspaceFiles).toHaveBeenCalledWith('zip');
 
     const s = useApiStore.getState();
     expect(s.collections.map((c) => c.id)).toEqual(['c1', 'mine']);
@@ -250,23 +250,23 @@ describe('Settings chip and modal', () => {
     expect(status()).toContain('Imported 1 collection(s) and 1 environment(s)');
 
     // Re-importing (here from the folder) replaces by id instead of duplicating.
-    vi.mocked(pickNextPostmanWorkspace).mockResolvedValue(files.map((f) => ({ ...f, path: f.path.slice(6) })));
-    await click(button('Import next-postman workspace (folder)'));
-    expect(pickNextPostmanWorkspace).toHaveBeenLastCalledWith('folder');
+    vi.mocked(pickWorkspaceFiles).mockResolvedValue(files.map((f) => ({ ...f, path: f.path.slice(6) })));
+    await click(button('Import workspace (folder)'));
+    expect(pickWorkspaceFiles).toHaveBeenLastCalledWith('folder');
     expect(useApiStore.getState().collections.map((c) => c.id)).toEqual(['c1', 'mine']);
     expect(useApiStore.getState().environments).toHaveLength(1);
   });
 
-  it('next-postman import reports a cancel as nothing and an empty selection or Rust error as an error', async () => {
+  it('workspace import reports a cancel as nothing and an empty selection or Rust error as an error', async () => {
     open();
-    vi.mocked(pickNextPostmanWorkspace).mockResolvedValueOnce(null);
-    await click(button('Import next-postman workspace (zip)'));
+    vi.mocked(pickWorkspaceFiles).mockResolvedValueOnce(null);
+    await click(button('Import workspace (zip)'));
     expect(status()).toBe('');
-    vi.mocked(pickNextPostmanWorkspace).mockResolvedValueOnce([{ path: 'package.json', text: '{}' }]);
-    await click(button('Import next-postman workspace (folder)'));
-    expect(status()).toMatch(/No next-postman workspace found/);
-    vi.mocked(pickNextPostmanWorkspace).mockRejectedValueOnce({ kind: 'other', message: 'Workspace too large' });
-    await click(button('Import next-postman workspace (zip)'));
+    vi.mocked(pickWorkspaceFiles).mockResolvedValueOnce([{ path: 'package.json', text: '{}' }]);
+    await click(button('Import workspace (folder)'));
+    expect(status()).toMatch(/No workspace found/);
+    vi.mocked(pickWorkspaceFiles).mockRejectedValueOnce({ kind: 'other', message: 'Workspace too large' });
+    await click(button('Import workspace (zip)'));
     expect(status()).toBe('Workspace too large');
     expect(useApiStore.getState().collections).toEqual([]);
   });

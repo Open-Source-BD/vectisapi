@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useApiStore } from '../../store/useApiStore';
 import { getAppVersion, openDataDir, type Settings } from '../../lib/native/invoke';
-import { exportAll, importAll, importNextPostman } from '../../lib/native/backup';
+import { exportAll, importAll, importWorkspace } from '../../lib/native/backup';
 
 const MB = 1024 * 1024;
 export const HISTORY_LIMIT_MIN = 50;
@@ -133,10 +133,8 @@ function SettingsModalInner({ initial }: { initial: Settings }) {
   };
   const onImportNp = (source: 'zip' | 'folder') =>
     run(async () => {
-      const counts = await importNextPostman(source);
-      return counts
-        ? `Imported ${counts.collections} collection(s) and ${counts.environments} environment(s) from next-postman.`
-        : null;
+      const counts = await importWorkspace(source);
+      return counts ? `Imported ${counts.collections} collection(s) and ${counts.environments} environment(s).` : null;
     });
 
   const icon = (name: string) => <span className="material-symbols-outlined">{name}</span>;
@@ -305,13 +303,13 @@ function SettingsModalInner({ initial }: { initial: Settings }) {
             </div>
           )}
 
-          <label className="modal-label">Import next-postman workspace</label>
+          <label className="modal-label">Import workspace</label>
           <div style={row}>
             <button className="md-tonal-btn" disabled={busy} onClick={() => void onImportNp('zip')}>
-              {icon('folder_zip')} Import next-postman workspace (zip)
+              {icon('folder_zip')} Import workspace (zip)
             </button>
             <button className="md-tonal-btn" disabled={busy} onClick={() => void onImportNp('folder')}>
-              {icon('folder')} Import next-postman workspace (folder)
+              {icon('folder')} Import workspace (folder)
             </button>
           </div>
 

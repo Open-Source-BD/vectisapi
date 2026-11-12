@@ -15,7 +15,7 @@ function normalizeUrl(url: string): string {
 }
 
 /**
- * Append query pairs (WHATWG-serialized, like next-postman). An unparseable URL is
+ * Append query pairs (WHATWG-serialized). An unparseable URL is
  * passed through with pairs concatenated, leaving the error to the engine.
  */
 function withQuery(url: string, pairs: [string, string][]): string {

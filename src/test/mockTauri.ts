@@ -1,7 +1,7 @@
 import type { Channel } from '@tauri-apps/api/core';
 import { mockIPC } from '@tauri-apps/api/mocks';
-import type { CookieView, RtEvent, Settings, WorkspaceSnapshot } from '@/features/api-client/lib/native/invoke';
-import type { HttpRequestSpec, ResponseMeta } from '@/features/api-client/types';
+import type { CookieView, RtEvent, Settings, WorkspaceSnapshot } from '@/features/vectisapi/lib/native/invoke';
+import type { HttpRequestSpec, ResponseMeta } from '@/features/vectisapi/types';
 
 /**
  * Browser-only stand-in for the Rust command layer, used by the Playwright e2e suite and the

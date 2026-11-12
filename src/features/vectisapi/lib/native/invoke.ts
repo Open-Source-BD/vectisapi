@@ -86,18 +86,18 @@ export function openDataDir(): Promise<void> {
   return invoke<void>('open_data_dir');
 }
 
-/** One file of a next-postman workspace: `/`-separated path relative to the zip/folder root. */
-export interface NextPostmanFile {
+/** One file of a workspace: `/`-separated path relative to the zip/folder root. */
+export interface WorkspaceFile {
   path: string;
   text: string;
 }
 
 /**
- * Shows a dialog for a next-postman workspace `.zip` or folder and returns its `*.json` files
+ * Shows a dialog for a workspace `.zip` or folder and returns its `*.json` files
  * (null if cancelled). Rejects with "Workspace too large" past 50 MB.
  */
-export function pickNextPostmanWorkspace(source: 'zip' | 'folder'): Promise<NextPostmanFile[] | null> {
-  return invoke<NextPostmanFile[] | null>('pick_next_postman_workspace', { source });
+export function pickWorkspaceFiles(source: 'zip' | 'folder'): Promise<WorkspaceFile[] | null> {
+  return invoke<WorkspaceFile[] | null>('pick_workspace_files', { source });
 }
 
 export function cookiesList(): Promise<CookieView[]> {

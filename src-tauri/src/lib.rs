@@ -31,7 +31,7 @@ pub(crate) fn register_commands<R: Runtime>(builder: Builder<R>) -> Builder<R> {
         http::get_response_body,
         files::save_response_body,
         files::open_data_dir,
-        import::pick_next_postman_workspace,
+        import::pick_workspace_files,
         realtime::rt_open_ws,
         realtime::rt_open_sse,
         realtime::rt_send,

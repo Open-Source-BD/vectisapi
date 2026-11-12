@@ -2,10 +2,10 @@ import { flushNow, pausePersistence, reloadWorkspace, resumePersistence } from '
 import { useApiStore } from '../../store/useApiStore';
 import type { Collection, EnvVar, Environment } from '../../types';
 import { deserializeWorkspace, type FileEntry, type WorkspaceData } from '../workspaceFile';
-import { exportBackup, importBackup, pickNextPostmanWorkspace, type NextPostmanFile } from './invoke';
+import { exportBackup, importBackup, pickWorkspaceFiles, type WorkspaceFile } from './invoke';
 
 /**
- * Settings-modal actions: full backup export/import and the one-way next-postman migration.
+ * Settings-modal actions: full backup export/import and the one-way workspace-folder import.
  * Rust shows every dialog; these only orchestrate flushing and reloading the store.
  */
 
@@ -55,10 +55,10 @@ export function withoutFilePaths<T>(value: T): T {
 }
 
 /**
- * Picked files → next-postman's workspace-relative paths (`collections/...`, `environments/...`).
+ * Picked files → workspace-relative paths (`collections/...`, `environments/...`).
  * A zip made by the OS archiver, or a parent folder, adds leading directories; they're dropped.
  */
-export function toWorkspaceEntries(files: NextPostmanFile[]): FileEntry[] {
+export function toWorkspaceEntries(files: WorkspaceFile[]): FileEntry[] {
   const out: FileEntry[] = [];
   for (const file of files) {
     const parts = file.path.split('/');
@@ -91,19 +91,19 @@ export function mergeWorkspace(
 }
 
 /**
- * Imports a next-postman workspace (its exported `.zip` or its folder) into the store, which
+ * Imports a workspace (its exported `.zip` or its folder) into the store, which
  * persists it. Resolves to what was imported, or null if cancelled; rejects if the selection
- * holds no next-postman workspace.
+ * holds no workspace.
  */
-export async function importNextPostman(
+export async function importWorkspace(
   source: 'zip' | 'folder',
 ): Promise<{ collections: number; environments: number } | null> {
-  const files = await pickNextPostmanWorkspace(source);
+  const files = await pickWorkspaceFiles(source);
   if (!files) return null;
   // Keep `fileName` so the user sees which file to pick again.
   const data = withoutFilePaths(deserializeWorkspace(toWorkspaceEntries(files)));
   if (!data.collections.length && !data.environments.length && !data.globals.length) {
-    throw new Error('No next-postman workspace found (expected collections/ or environments/).');
+    throw new Error('No workspace found (expected collections/ or environments/).');
   }
   useApiStore.setState((s) => {
     const expanded = { ...s.expanded };

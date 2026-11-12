@@ -6,10 +6,10 @@ import '@fontsource/roboto/700.css';
 import '@fontsource/fira-code/400.css';
 import '@fontsource/fira-code/500.css';
 import './app/globals.css';
-// After globals.css, as in next-postman (whose Google Fonts <link> follows the app CSS): the
+// After globals.css: the
 // icon class's 24px size must win over base.css's 20px.
 import './assets/fonts/material-symbols.css';
-import { ApiClient } from '@/features/api-client/ApiClient';
+import { VectisApi } from '@/features/vectisapi/VectisApi';
 
 // Browser-only e2e/fidelity builds (`--mode e2e`) stand in for the Rust layer; Vite drops this otherwise.
 if (import.meta.env.MODE === 'e2e') {
@@ -19,6 +19,6 @@ if (import.meta.env.MODE === 'e2e') {
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <ApiClient />
+    <VectisApi />
   </React.StrictMode>,
 );

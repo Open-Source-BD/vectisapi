@@ -7,17 +7,17 @@ Status: draft for approval
 
 A free, offline, cross-platform (macOS, Windows, Linux) desktop API client: a Postman alternative.
 
-It is a port of **next-postman** (https://github.com/Open-Source-BD/next-postman, MIT, cloned at
-`~/shaon/next-postman`, commit `ae84135`) into a **Tauri 2** desktop app with a **Rust** core.
+It is a port of **the original web app** (MIT, cloned at
+`~/shaon/reference-app`, commit `ae84135`) into a **Tauri 2** desktop app with a **Rust** core.
 
-Why it exists (the user's words): browser-based next-postman hits CORS problems, and Postman is paid.
-Concretely, next-postman sends requests through a Next.js server route; when deployed, that server
+Why it exists (the user's words): the browser-based original web app hits CORS problems, and Postman is paid.
+Concretely, the original web app sends requests through a Next.js server route; when deployed, that server
 cannot reach `localhost`/internal hosts and gets blocked by bot walls, and its browser-direct fallback
 dies on CORS. WebSocket is browser-direct, so no custom headers. A native app with a Rust HTTP stack
 removes every one of those limits.
 
 The user's explicit requirements:
-1. **The UI must be the same** as next-postman.
+1. **The UI must be the same** as the original web app.
 2. **Extremely fast.** Use the best Rust packages/frameworks available.
 3. **Offline**, data stored in an **internal database** (not files in a folder).
 4. The user delegated all other choices: "choose the best options, research when unsure."
@@ -25,7 +25,7 @@ The user's explicit requirements:
 
 ## 2. Goals
 
-- Feature parity with next-postman (inventory in §5), with identical look and interaction.
+- Feature parity with the original web app (inventory in §5), with identical look and interaction.
 - Every request behaves as if sent by curl from the user's machine: localhost, LAN, self-signed
   certs (opt-in), any header incl. `Cookie`, `Host`, `User-Agent`, `Origin`; WebSocket with custom headers.
 - Performance targets (release build, mid-range laptop):
@@ -34,7 +34,7 @@ The user's explicit requirements:
   - A 50 MB response does not freeze the UI; first paint of the body view **< 300 ms**.
   - History/collection search over 10k items: **< 50 ms** per keystroke.
   - Idle memory **< 150 MB**; installer **< 15 MB**.
-- Improvements over next-postman (§6).
+- Improvements over the original web app (§6).
 
 ## 3. Non-goals (v1)
 
@@ -47,19 +47,19 @@ The user's explicit requirements:
 
 ## 4. Anti-goals (failure even if it "works")
 
-- UI drifts visibly from next-postman (different layout, colors, spacing, fonts, shortcuts).
+- UI drifts visibly from the original web app (different layout, colors, spacing, fonts, shortcuts).
 - The UI thread freezes on large responses, big collections, or long WebSocket logs.
 - Any network call leaves the machine except the user's own requests (fonts must be bundled, no CDN).
 - Requests silently altered (headers dropped, body re-encoded, cookies leaked from elsewhere).
 - User data lost on crash (DB must be durable; writes must not be "save on quit").
 
-## 5. What next-postman has (to be preserved)
+## 5. What the original web app has (to be preserved)
 
 ~12k lines TS. Next.js 16 App Router, React 19, Zustand 5, ~2k lines of plain CSS
 (`src/app/*.css`, design tokens in `design-tokens.css`), Roboto + Fira Code via `next/font`,
 Material Symbols icon names via an `icon()` helper. 237 Vitest tests, 7 Playwright e2e.
 
-Screens/components (all under `src/features/api-client/components/`):
+Screens/components (all under `src/features/vectisapi/components/`):
 - TopBar: logo "API Client", WorkspaceChip ("Connect folder"), theme toggle, Import cURL,
   environment select, Environments button.
 - Sidebar: History / Collections tabs, Import / Export, search, grouped history, collection tree
@@ -91,7 +91,7 @@ Browser-only plumbing that goes away: `app/api/proxy`, `app/api/stream`, `proxyC
 ### 6.1 Shell and frontend
 
 - **Tauri 2.12.x** (latest stable; Tauri 3 with optional CEF is alpha, revisit when stable for Linux).
-  Rationale (researched 2026-11): the only option that keeps next-postman's React UI byte-identical;
+  Rationale (researched 2026-11): the only option that keeps the original web app's React UI byte-identical;
   GPUI/Dioxus-native/egui/iced/Slint all require a UI rewrite and cannot look identical. Hot paths
   (network, storage, search, big bodies) live in Rust regardless.
 - **Vite + React 19 + TypeScript + Zustand 5** replaces Next.js. There is no server anymore; Next
@@ -105,7 +105,7 @@ Browser-only plumbing that goes away: `app/api/proxy`, `app/api/stream`, `proxyC
   - "Retry from browser" / bot-wall UI removed (no longer reachable).
   - Response meta gains a hover popover with timing breakdown (6.3).
   - Everything else pixel-identical. Verify with side-by-side screenshots of the same states
-    (next-postman `npm run dev` vs VectisAPI) for: empty state, request+JSON response, collections tree,
+    (the original web app `npm run dev` vs VectisAPI) for: empty state, request+JSON response, collections tree,
     env modal, runner modal, realtime pane, dark mode.
 
 ### 6.2 Rust core layout
@@ -116,14 +116,14 @@ Cargo workspace:
 - `src-tauri` — thin Tauri layer: commands, channels, state wiring, window setup.
 
 Runtime: `tokio` (multi-thread). Errors: `thiserror` in core, mapped to a serializable
-`{ kind, message }` at the command boundary (kinds mirror next-postman's messages: connection
+`{ kind, message }` at the command boundary (kinds mirror the original web app's messages: connection
 refused, DNS failed, timeout, reset, TLS, invalid URL...).
 
 ### 6.3 HTTP engine
 
 - **`reqwest` 0.13** with `rustls` (+ native roots via `rustls-platform-verifier`), `http2`,
   `gzip`/`brotli`/`deflate`/`zstd` decompression, `stream`. One shared `Client` per settings
-  profile (connection pooling = big speed win over next-postman's per-request server fetch).
+  profile (connection pooling = big speed win over the original web app's per-request server fetch).
   A second client is built only when settings change (proxy, TLS verify, redirects).
 - Request built entirely in Rust from a serializable `HttpRequestSpec` (method, final URL, headers
   list preserving order and duplicates, body variant, timeout, follow-redirects). Auth/env resolution
@@ -143,7 +143,7 @@ refused, DNS failed, timeout, reset, TLS, invalid URL...).
 - Cancellation: every send has a request id; `cancel_request(id)` aborts the tokio task. Runner
   Cancel uses the same.
 - Cookie jar: moved to Rust (`cookie_store` crate), persisted in SQLite. **Behavior upgraded to
-  RFC 6265** (Domain/Path matching, Expires/Max-Age, Secure, HttpOnly) — next-postman's exact-host,
+  RFC 6265** (Domain/Path matching, Expires/Max-Age, Secure, HttpOnly) — the original web app's exact-host,
   name/value-only jar sends wrong cookies vs. curl/Postman, which this app exists to match. CookiesModal
   keeps its layout (grouped by host, name, value, delete/clear); it additionally shows the path when it
   isn't `/` and an expiry hint. Applied unless the request sets its own `Cookie` header (current
@@ -176,7 +176,7 @@ refused, DNS failed, timeout, reset, TLS, invalid URL...).
   - `environments(id, name, sort, vars_json, updated_at)`, `globals(vars_json)`,
     `active_env(id)`.
   - `history(id, ts, method, url, status, duration_ms, data_json)` + FTS5 index on `method url`.
-    Semantics preserved from next-postman (`historySlice.ts`): one entry per method+URL, a repeat send
+    Semantics preserved from the original web app (`historySlice.ts`): one entry per method+URL, a repeat send
     replaces the old entry and moves it to the top. **Cap raised from 50 to 1,000 by default**
     (configurable 50–10,000 in Settings); oldest pruned. Sidebar list is virtualized. *(Builder-check
     decision.)*
@@ -186,9 +186,9 @@ refused, DNS failed, timeout, reset, TLS, invalid URL...).
 - Frontend persistence: replace `persist.ts` (localStorage) with a `persist` layer that subscribes to
   the store and sends **only the changed entity** (diff by reference, like today), **debounced 300 ms**
   per entity, plus flush on window close. Hydration on start via one `load_workspace` command.
-- Secrets: env values stored in the DB as-is (same as next-postman localStorage). OS keychain is a
+- Secrets: env values stored in the DB as-is (same as the original web app localStorage). OS keychain is a
   later improvement, not v1.
-- **Migration from next-postman:** backup import also accepts next-postman's workspace folder / zip
+- **Migration from the original web app:** backup import also accepts the original web app's workspace folder / zip
   format — keep `workspaceFile.ts` parsing (import-only) for this. *(Builder-check decision.)*
 - Import/export unchanged in format (Postman v2.1, OpenAPI 3.0/3.1 JSON+YAML, cURL); export writes
   files via the Tauri dialog. Additionally: **full backup export/import** (single JSON of everything)
@@ -225,11 +225,11 @@ history limit, theme. Plus "Backup: export all / import all" and "Open data fold
   `tauri-action`, producing `.dmg`, `.msi`/`.exe` (NSIS), `.AppImage`/`.deb`. Unsigned in v1.
 - Release profile: `lto = "fat"`, `codegen-units = 1`, `opt-level = 3`, `strip = true`,
   `panic = "abort"`.
-- License: MIT, keep next-postman's copyright notice alongside ours.
+- License: MIT, keep the original app's copyright notice alongside ours.
 
-### 6.10 Relationship to next-postman
+### 6.10 Relationship to the original web app
 
-VectisAPI is a **one-time fork**: copy next-postman's frontend at `ae84135`, then refactor freely
+VectisAPI is a **one-time fork**: copy the original web app's frontend at `ae84135`, then refactor freely
 (ordered headers, partial response bodies, Rust-backed cookies, etc.). No obligation to stay
 mergeable with upstream. Keep `lib/` modules intact where they need no change, simply to reduce work.
 *(Builder-check decision.)*
@@ -248,6 +248,6 @@ mergeable with upstream. Keep `lib/` modules intact where they need no change, s
 - **Linux WebKitGTK** rendering is slower and buggy on some NVIDIA setups. Mitigation: virtualized
   views, no heavy CSS effects added, document Tauri's `WEBKIT_DISABLE_DMABUF_RENDERER` workaround.
   Move to Tauri 3 CEF backend when stable.
-- WebKit (macOS/Linux) vs Chromium (next-postman's usual browser) CSS differences may cause small
+- WebKit (macOS/Linux) vs Chromium (the original web app's usual browser) CSS differences may cause small
   visual drift — covered by the screenshot comparison.
 - reqwest normalizes some headers (e.g. header name case on HTTP/1). Acceptable; documented.

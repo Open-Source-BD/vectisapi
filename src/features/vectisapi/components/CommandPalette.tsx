@@ -72,7 +72,7 @@ function CommandPaletteInner() {
     {
       key: 'settings',
       label: 'Open settings',
-      hint: 'preferences backup import next-postman proxy timeout',
+      hint: 'preferences backup import workspace proxy timeout',
       icon: 'settings',
       run: act(() => s().setSettingsModalOpen(true)),
     },

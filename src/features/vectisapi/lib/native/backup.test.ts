@@ -14,7 +14,7 @@ vi.mock('./invoke', async (orig) => ({
     if (fail.import) throw { kind: 'other', message: 'bad backup' };
     return '/b.json';
   }),
-  pickNextPostmanWorkspace: vi.fn(),
+  pickWorkspaceFiles: vi.fn(),
 }));
 vi.mock('../../store/persistNative', () => ({
   flushNow: vi.fn(async () => {
@@ -35,12 +35,12 @@ vi.mock('../../store/persistNative', () => ({
 import {
   exportAll,
   importAll,
-  importNextPostman,
+  importWorkspace,
   mergeWorkspace,
   RESTART_AFTER_IMPORT,
   toWorkspaceEntries,
 } from './backup';
-import { importBackup, pickNextPostmanWorkspace } from './invoke';
+import { importBackup, pickWorkspaceFiles } from './invoke';
 import { serializeWorkspace } from '../workspaceFile';
 import { createDefaultTab, useApiStore } from '../../store/useApiStore';
 import type { Collection } from '../../types';
@@ -85,7 +85,7 @@ describe('backup', () => {
   });
 });
 
-describe('importNextPostman', () => {
+describe('importWorkspace', () => {
   it('drops form-data file paths but keeps file names', async () => {
     const request = {
       ...createDefaultTab(),
@@ -111,10 +111,10 @@ describe('importNextPostman', () => {
       text: e.content,
     }));
     expect(files.some((f) => f.text.includes('/Users/someone/doc.pdf'))).toBe(true);
-    vi.mocked(pickNextPostmanWorkspace).mockResolvedValue(files);
+    vi.mocked(pickWorkspaceFiles).mockResolvedValue(files);
     useApiStore.setState({ collections: [], environments: [], globals: [] });
 
-    expect(await importNextPostman('zip')).toEqual({ collections: 1, environments: 0 });
+    expect(await importWorkspace('zip')).toEqual({ collections: 1, environments: 0 });
     const imported = useApiStore.getState().collections[0];
     expect(JSON.stringify(imported)).not.toContain('filePath');
     const node = imported.children[0];
